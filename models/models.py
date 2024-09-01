@@ -28,7 +28,7 @@ class BaselineCNN(nn.Module):
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
         
         # Fully connected layers
-        self.fc1 = nn.Linear(64 * 16 * 21, 128) 
+        self.fc1 = nn.Linear(64 * 16 * 10, 128) 
         self.fc2 = nn.Linear(128, num_classes)
         
         # Dropout layer for regularization
@@ -36,12 +36,12 @@ class BaselineCNN(nn.Module):
     
     def forward(self, x):
         # Convolutional layers with ReLU activation and pooling
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
-        x = self.pool(F.relu(self.conv3(x)))
+        x = self.pool(F.relu(self.conv1(x)))  # Output: [batch_size, 16, 64, 42]
+        x = self.pool(F.relu(self.conv2(x)))  # Output: [batch_size, 32, 32, 21]
+        x = self.pool(F.relu(self.conv3(x)))  # Output: [batch_size, 64, 16, 10]
         
         # Flatten the output from the convolutional layers
-        x = x.view(-1, 64 * 16 * 21)
+        x = x.view(-1, 64 * 16 * 10)  # Flatten to match the input size of fc1
         
         # Fully connected layers with dropout
         x = F.relu(self.fc1(x))
