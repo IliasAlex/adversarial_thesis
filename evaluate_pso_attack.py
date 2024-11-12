@@ -44,32 +44,55 @@ def load_or_train_model(config, train_loader, val_loader, device):
 
     return model
 
-def create_balanced_subset(data_loader, sample_size=60):
+def create_balanced_subset(data_loader, model, device, sample_size=60):
     """
-    Create a balanced subset with exactly `sample_size` samples per class.
-    Assumes that the dataset provides at least `sample_size` samples for each class.
+    Create a balanced subset with exactly `sample_size` samples per class,
+    only including samples that the model classifies correctly.
     """
+    model.eval()
     all_data = []
     all_labels = []
-    for data, labels in data_loader:
-        all_data.append(data)
-        all_labels.append(labels)
+    correct_indices_per_class = {label: [] for label in range(model.fc2.out_features)}
 
-    all_data = torch.cat(all_data)
-    all_labels = torch.cat(all_labels)
+    # Collect correctly classified samples
+    with torch.no_grad():
+        for data, labels in data_loader:
+            data, labels = data.to(device), labels.to(device)
 
-    # Count the samples per class
-    class_indices = {label.item(): (all_labels == label).nonzero(as_tuple=True)[0].tolist() for label in torch.unique(all_labels)}
-    balanced_indices = []
+            if data.dim() == 3:
+                data = data.unsqueeze(1)
 
-    for label, indices in class_indices.items():
-        # Select exactly `sample_size` samples per class
-        selected_indices = random.sample(indices, sample_size)
-        balanced_indices.extend(selected_indices)
+            outputs = model(data)
+            _, predicted = outputs.max(1)
 
-    logging.info(f"Selected {len(balanced_indices)} samples for balanced evaluation.")
-    dataset = TensorDataset(all_data, all_labels)
-    return DataLoader(Subset(dataset, balanced_indices), batch_size=32, shuffle=False)
+            for i in range(len(data)):
+                true_label = labels[i].item()
+                pred_label = predicted[i].item()
+
+                # Only consider samples that are correctly classified
+                if true_label == pred_label:
+                    correct_indices_per_class[true_label].append((data[i].cpu(), labels[i].cpu()))
+
+    # Create a balanced subset with correctly classified samples
+    selected_data = []
+    selected_labels = []
+    for label, samples in correct_indices_per_class.items():
+        if len(samples) >= sample_size:
+            # Randomly select `sample_size` correctly classified samples
+            selected_samples = random.sample(samples, sample_size)
+        else:
+            # If there are fewer than `sample_size` samples, take all available
+            selected_samples = samples
+
+        for data, label in selected_samples:
+            selected_data.append(data)
+            selected_labels.append(label)
+
+    logging.info(f"Selected {len(selected_data)} samples for balanced evaluation with correctly classified samples.")
+    
+    # Create a TensorDataset and DataLoader
+    dataset = TensorDataset(torch.stack(selected_data), torch.stack(selected_labels))
+    return DataLoader(dataset, batch_size=32, shuffle=False)
 
 def evaluate_attack_on_folds(config):
     setup_logging()
@@ -100,7 +123,8 @@ def evaluate_attack_on_folds(config):
     model = load_or_train_model(config, train_loader, val_loader, device)
 
     # Create a balanced subset for testing
-    balanced_test_loader = create_balanced_subset(test_loader, sample_size=60)
+    balanced_test_loader = create_balanced_subset(test_loader, model, device, sample_size=50)
+
     # Verify class distribution in the balanced subset
     balanced_labels = []
     for _, labels in balanced_test_loader:
@@ -115,18 +139,44 @@ def evaluate_attack_on_folds(config):
     logging.info(f"Balanced Test Accuracy: {test_acc:.4f}")
 
     # Initialize PSO attack
+    max_iter = 100  
+    swarm_size = 150  
+    epsilon = 0.3
+    c1 = 0.7
+    c2 = 0.7
+    w_max = 0.9
+    w_min = 0.1
+    patience = 50
+    mutation_rate = 0.5
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
     pso_attack = PSOAttack(
-        model,
-        max_iter=500,
-        swarm_size=150,
-        epsilon=0.03,  
-        c1=2.0,
-        c2=2.0,
-        w_max=1.0,
-        w_min=0.3,
-        patience=50,
-        mutation_rate=0.2,
-        device='cuda'
+        model=model,
+        max_iter=max_iter,
+        swarm_size=swarm_size,
+        epsilon=epsilon,
+        c1=c1,
+        c2=c2,
+        w_max=w_max,
+        w_min=w_min,
+        patience=patience,
+        mutation_rate=mutation_rate,
+        device=device
+    )
+
+    # Detailed logging of the PSO attack hyperparameters
+    logging.info(
+        f"Initialized PSO attack with the following hyperparameters:\n"
+        f"\tmax_iter = {max_iter}\n"
+        f"\tswarm_size = {swarm_size}\n"
+        f"\tepsilon = {epsilon}\n"
+        f"\tc1 (cognitive weight) = {c1}\n"
+        f"\tc2 (social weight) = {c2}\n"
+        f"\tw_max (maximum inertia weight) = {w_max}\n"
+        f"\tw_min (minimum inertia weight) = {w_min}\n"
+        f"\tpatience = {patience}\n"
+        f"\tmutation_rate = {mutation_rate}\n"
+        f"\tdevice = {device}"
     )
 
 
