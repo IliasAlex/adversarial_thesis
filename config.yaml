@@ -7,3 +7,5 @@ manualSeed: 3
 batch_size: 32
 num_epochs: 100
 learning_rate: 0.001
+model_path: "/home/ilias/projects/adversarial_thesis/models/baseline_cnn.pth"
+mode: "attack"

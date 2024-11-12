@@ -2,15 +2,15 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
-import random
 import argparse
-import yaml
 import logging
 from sklearn.metrics import classification_report
 from datasets.datasets import get_data_loaders
 from models.models import BaselineCNN
 from loops.trainer import train, evaluate
 from utils.utils import load_config, set_seed, setup_logging
+from attacks.pso_attack import PSOAttack
+from evaluate_pso_attack import evaluate_attack_on_folds
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Sound classification with cross-validation')
@@ -97,13 +97,17 @@ def evaluate_with_predictions(model, data_loader, criterion, device):
 def main():
     args = parse_args()
     config = load_config(args.config)
-
-    setup_logging()
-    logging.info("Starting cross-validation")
+    mode = config['mode']
     set_seed(config['manualSeed'])
-
-    cross_validate(config)
-    logging.info("Cross-validation completed")
+    
+    if mode == "train":
+        setup_logging()
+        logging.info("Starting cross-validation")
+        
+        cross_validate(config)
+        logging.info("Cross-validation completed")
+    elif mode == "attack":
+         evaluate_attack_on_folds(config)
 
 if __name__ == "__main__":
     main()
