@@ -92,7 +92,7 @@ class PSOAttack:
             print(f"Iteration {iteration + 1}/{self.max_iter}, Best Fitness Score: {global_best_score:.4f}")
 
             # Check if an adversarial example is found
-            if global_best_score > 0.1:
+            if global_best_score > 0:
                 print("Adversarial example found!")
                 return global_best
 
