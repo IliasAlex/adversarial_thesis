@@ -52,7 +52,7 @@ class UrbanSound8KDataset(Dataset):
         # Convert to torch tensor
         label = torch.tensor(label, dtype=torch.long)
 
-        return mel_spectrogram_db, label
+        return mel_spectrogram_db, label, audio_file_path
 
 def get_data_loaders(annotations_file, root_dir, train_folds, val_folds, test_folds, batch_size=32, transform=None):
     # Create datasets for training, validation, and testing

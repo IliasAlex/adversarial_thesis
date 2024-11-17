@@ -45,55 +45,48 @@ def load_or_train_model(config, train_loader, val_loader, device):
 
     return model
 
-def create_balanced_subset(data_loader, model, device, sample_size=60):
+def create_balanced_subset(test_loader, model, device, sample_size=50):
     """
-    Create a balanced subset with exactly `sample_size` samples per class,
-    only including samples that the model classifies correctly.
+    Create a balanced subset with correctly classified samples and include file paths.
     """
     model.eval()
-    all_data = []
-    all_labels = []
+    selected_data = []
+    selected_labels = []
+    selected_file_paths = []
     correct_indices_per_class = {label: [] for label in range(model.fc2.out_features)}
 
-    # Collect correctly classified samples
     with torch.no_grad():
-        for data, labels in data_loader:
+        for data, labels, file_paths in test_loader:
             data, labels = data.to(device), labels.to(device)
-
             if data.dim() == 3:
                 data = data.unsqueeze(1)
 
             outputs = model(data)
             _, predicted = outputs.max(1)
 
+            # Store only correctly classified samples
             for i in range(len(data)):
-                true_label = labels[i].item()
-                pred_label = predicted[i].item()
+                if predicted[i].item() == labels[i].item():
+                    correct_indices_per_class[labels[i].item()].append((data[i], labels[i], file_paths[i]))
 
-                # Only consider samples that are correctly classified
-                if true_label == pred_label:
-                    correct_indices_per_class[true_label].append((data[i].cpu(), labels[i].cpu()))
-
-    # Create a balanced subset with correctly classified samples
-    selected_data = []
-    selected_labels = []
+    # Select a balanced subset of correctly classified samples
     for label, samples in correct_indices_per_class.items():
         if len(samples) >= sample_size:
-            # Randomly select `sample_size` correctly classified samples
             selected_samples = random.sample(samples, sample_size)
         else:
-            # If there are fewer than `sample_size` samples, take all available
             selected_samples = samples
 
-        for data, label in selected_samples:
+        for data, label, file_path in selected_samples:
             selected_data.append(data)
             selected_labels.append(label)
+            selected_file_paths.append(file_path)
 
     logging.info(f"Selected {len(selected_data)} samples for balanced evaluation with correctly classified samples.")
-    
+
     # Create a TensorDataset and DataLoader
     dataset = TensorDataset(torch.stack(selected_data), torch.stack(selected_labels))
-    return DataLoader(dataset, batch_size=32, shuffle=False)
+    return DataLoader(dataset, batch_size=32, shuffle=False), selected_file_paths
+
 
 def evaluate_attack_on_folds(config):
     setup_logging()
@@ -117,11 +110,12 @@ def evaluate_attack_on_folds(config):
     model = load_or_train_model(config, train_loader, val_loader, device)
 
     # Create a balanced subset for testing
-    balanced_test_loader = create_balanced_subset(test_loader, model, device, sample_size=50)
+    balanced_test_loader, file_paths = create_balanced_subset(test_loader, model, device, sample_size=50)
 
     # Use 50 random examples from the balanced test loader
     all_data = []
     all_labels = []
+
     for data, labels in balanced_test_loader:
         all_data.append(data)
         all_labels.append(labels)
@@ -133,6 +127,7 @@ def evaluate_attack_on_folds(config):
     indices = random.sample(range(len(all_data)), 50)
     selected_data = all_data[indices]
     selected_labels = all_labels[indices]
+    selected_file_paths = [file_paths[i] for i in indices]
 
     logging.info(f"Selected 50 random examples from the balanced test set.")
 
@@ -149,12 +144,11 @@ def evaluate_attack_on_folds(config):
     # Initialize PSO attack
     max_iter = 20  
     swarm_size = 10  
-    epsilon = 0.3
+    epsilon = 0.9
     c1 = 0.7
     c2 = 0.7
     w_max = 0.9
     w_min = 0.1
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     pso_attack = PSOAttack(
         model=model,
@@ -168,6 +162,18 @@ def evaluate_attack_on_folds(config):
         device=device
     )
 
+    # Detailed logging of the PSO attack hyperparameters
+    logging.info(
+        f"Initialized PSO attack with hyperparameters:\n"
+        f"\tmax_iter = {max_iter}\n"
+        f"\tswarm_size = {swarm_size}\n"
+        f"\tepsilon = {epsilon}\n"
+        f"\tc1 = {c1}\n"
+        f"\tc2 = {c2}\n"
+        f"\tw_max = {w_max}\n"
+        f"\tw_min = {w_min}"
+    )
+
     # Initialize a list to store attack metrics
     attack_metrics = []
 
@@ -179,6 +185,7 @@ def evaluate_attack_on_folds(config):
     for i in tqdm(range(len(selected_data))):
         original_audio = selected_data[i].cpu().numpy().squeeze()
         current_label = selected_labels[i].item()
+        file_path = selected_file_paths[i]
 
         # Starting confidence and class
         starting_confidence = pso_attack.fitness_score(original_audio, current_label)
@@ -209,9 +216,10 @@ def evaluate_attack_on_folds(config):
         else:
             snr = float('inf')  # Infinite SNR if no perturbation is made
 
-        # Store metrics
+        # Store metrics, including the file path
         attack_metrics.append([
             "Success" if attack_success else "Failure",
+            file_path,
             starting_confidence,
             final_confidence,
             iterations,
@@ -226,14 +234,13 @@ def evaluate_attack_on_folds(config):
             adversarial_examples.append(adv_example)
             original_labels.append(current_label)
 
-
     logging.info(f"Generated a total of {len(adversarial_examples)} adversarial examples.")
 
     # Write attack metrics to CSV
     csv_file = f"50_results_{epsilon}.csv"
     with open(csv_file, mode='w', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow(["Success/Failure", "Starting Confidence", "Final Confidence",
+        writer.writerow(["Success/Failure", "File Path", "Starting Confidence", "Final Confidence",
                          "Iterations", "SNR", "Starting Class", "Final Class", "Queries"])
         writer.writerows(attack_metrics)
 
