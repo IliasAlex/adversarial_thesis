@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import random
 
 class PSOAttack:
-    def __init__(self, model, max_iter=100, swarm_size=150, epsilon=0.1, c1=2.0, c2=2.0, w_max=1.0, w_min=0.3, patience=20, mutation_rate=0.2, device='cuda'):
+    def __init__(self, model, max_iter=20, swarm_size=10, epsilon=0.3, c1=2.0, c2=2.0, w_max=0.9, w_min=0.1, device='cuda'):
         self.model = model.to(device)
         self.max_iter = max_iter
         self.swarm_size = swarm_size
@@ -13,8 +13,6 @@ class PSOAttack:
         self.c2 = c2
         self.w_max = w_max
         self.w_min = w_min
-        self.patience = patience
-        self.mutation_rate = mutation_rate
         self.device = device
 
     def fitness_score(self, audio, target_label):
@@ -31,6 +29,9 @@ class PSOAttack:
             return target_confidence - other_confidence
 
     def initialize_particles(self, original_audio):
+        """
+        Initialize particles with random noise around the original audio.
+        """
         particles = []
         velocities = []
         for _ in range(self.swarm_size):
@@ -42,6 +43,9 @@ class PSOAttack:
         return np.array(particles), np.array(velocities)
 
     def update_velocity(self, velocity, particle, personal_best, global_best, w, c1, c2):
+        """
+        Update the velocity of a particle.
+        """
         r1, r2 = random.random(), random.random()
         inertia = w * velocity
         cognitive = c1 * r1 * (personal_best - particle)
@@ -49,13 +53,16 @@ class PSOAttack:
         return inertia + cognitive + social
 
     def clip_audio(self, audio, original_audio, epsilon):
+        """
+        Clip the audio to ensure perturbation is within bounds.
+        """
         return np.clip(audio, original_audio - epsilon, original_audio + epsilon)
 
-    def mutate_particle(self, particle):
-        mutation = np.random.uniform(-self.mutation_rate, self.mutation_rate, size=particle.shape)
-        return np.clip(particle + mutation, -1.0, 1.0)
-
     def attack(self, original_audio, target_label):
+        """
+        Perform the PSO attack to generate an adversarial example.
+        """
+        # Initialize particles and velocities
         particles, velocities = self.initialize_particles(original_audio)
         personal_best = np.copy(particles)
         global_best = np.copy(particles[np.argmax([self.fitness_score(p, target_label) for p in particles])])
@@ -63,15 +70,16 @@ class PSOAttack:
         personal_best_scores = [self.fitness_score(p, target_label) for p in particles]
         global_best_score = max(personal_best_scores)
 
-        no_improvement = 0
-
+        # Main optimization loop
         for iteration in range(self.max_iter):
             w = self.w_max - (iteration / self.max_iter) * (self.w_max - self.w_min)
 
             for i in range(self.swarm_size):
+                # Update velocity and position of each particle
                 velocities[i] = self.update_velocity(velocities[i], particles[i], personal_best[i], global_best, w, self.c1, self.c2)
                 particles[i] = self.clip_audio(particles[i] + velocities[i], original_audio, self.epsilon)
 
+                # Evaluate fitness
                 score = self.fitness_score(particles[i], target_label)
                 if score > personal_best_scores[i]:
                     personal_best[i] = np.copy(particles[i])
@@ -80,28 +88,13 @@ class PSOAttack:
                 if score > global_best_score:
                     global_best = np.copy(particles[i])
                     global_best_score = score
-                    no_improvement = 0  # Reset if improvement found
 
             print(f"Iteration {iteration + 1}/{self.max_iter}, Best Fitness Score: {global_best_score:.4f}")
-            print(f"Sample Particle Scores: {[round(score, 4) for score in personal_best_scores[:5]]}")
 
-            # Apply mutation if no improvement over 3/4 of the patience period
-            if no_improvement >= 3 * self.patience // 4:
-                print("Applying mutation to escape local minima.")
-                temp_particles = [self.mutate_particle(p) for p in personal_best[:self.swarm_size // 4]]
-                particles[:len(temp_particles)] = temp_particles
-
-            # Early stopping if no improvement for the patience period
-            if no_improvement >= self.patience:
-                print("Early stopping due to no improvement.")
-                break
-
-            # Check for adversarial example with a significant improvement threshold
-            if global_best_score > 0.1:  # Adjust threshold as needed
+            # Check if an adversarial example is found
+            if global_best_score > 0.1:
                 print("Adversarial example found!")
                 return global_best
-
-            no_improvement += 1
 
         print("Failed to find an adversarial example within the maximum iterations.")
         return None

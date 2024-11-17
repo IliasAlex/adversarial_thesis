@@ -139,15 +139,13 @@ def evaluate_attack_on_folds(config):
     logging.info(f"Balanced Test Accuracy: {test_acc:.4f}")
 
     # Initialize PSO attack
-    max_iter = 100  
-    swarm_size = 150  
-    epsilon = 0.3
+    max_iter = 20  
+    swarm_size = 10  
+    epsilon = 0.6
     c1 = 0.7
     c2 = 0.7
     w_max = 0.9
     w_min = 0.1
-    patience = 50
-    mutation_rate = 0.5
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     pso_attack = PSOAttack(
@@ -159,8 +157,6 @@ def evaluate_attack_on_folds(config):
         c2=c2,
         w_max=w_max,
         w_min=w_min,
-        patience=patience,
-        mutation_rate=mutation_rate,
         device=device
     )
 
@@ -174,8 +170,6 @@ def evaluate_attack_on_folds(config):
         f"\tc2 (social weight) = {c2}\n"
         f"\tw_max (maximum inertia weight) = {w_max}\n"
         f"\tw_min (minimum inertia weight) = {w_min}\n"
-        f"\tpatience = {patience}\n"
-        f"\tmutation_rate = {mutation_rate}\n"
         f"\tdevice = {device}"
     )
 
@@ -189,6 +183,10 @@ def evaluate_attack_on_folds(config):
     adversarial_examples = []
     original_labels = []
 
+    adversarial_examples = []
+    original_labels = []
+
+    # Attack directly on the balanced test set
     for data, labels in balanced_test_loader:
         data, labels = data.to(device), labels.to(device)
         if data.dim() == 3:
@@ -198,28 +196,19 @@ def evaluate_attack_on_folds(config):
             original_audio = data[i].cpu().numpy().squeeze()
             current_label = labels[i].item()
 
-            # Skip this example if we already have enough adversarial samples for this class
-            if adversarial_counts[current_label] >= max_samples_per_class:
-                continue
+            # Select a random target label different from the current label
+            target_label = random.choice([label for label in range(config['num_classes']) if label != current_label])
 
-            # Select a valid target label different from the current label
-            available_classes = list(label_counts.keys())
-            available_classes.remove(current_label)
-            target_label = random.choice(available_classes)
-
+            # Perform PSO attack
             adv_example = pso_attack.attack(original_audio, target_label)
 
+            # Store the adversarial example if found
             if adv_example is not None:
                 adversarial_examples.append(adv_example)
                 original_labels.append(current_label)
-                adversarial_counts[current_label] += 1
 
-            # Stop generating examples if we have reached the limit for all classes
-            if all(count >= max_samples_per_class for count in adversarial_counts.values()):
-                break
+    logging.info(f"Generated a total of {len(adversarial_examples)} adversarial examples.")
 
-        if all(count >= max_samples_per_class for count in adversarial_counts.values()):
-            break
 
     logging.info(f"Generated a total of {len(adversarial_examples)} adversarial examples.")
 
