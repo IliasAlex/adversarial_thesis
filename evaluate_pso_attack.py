@@ -3,7 +3,8 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import logging
-import yaml
+from tqdm.auto import tqdm
+import csv
 from sklearn.metrics import classification_report
 from collections import Counter
 from torch.utils.data import Subset, DataLoader, TensorDataset
@@ -112,42 +113,47 @@ def evaluate_attack_on_folds(config):
         data_csv, config['data_dir'], train_folds, [val_fold], test_folds, batch_size=config['batch_size']
     )
 
-    # Check class distribution
-    all_labels = []
-    for _, labels in test_loader:
-        all_labels.extend(labels.cpu().numpy())
-    label_counts = Counter(all_labels)
-    logging.info(f"Class distribution in test folds: {label_counts}")
-
     # Load or train the model
     model = load_or_train_model(config, train_loader, val_loader, device)
 
     # Create a balanced subset for testing
     balanced_test_loader = create_balanced_subset(test_loader, model, device, sample_size=50)
 
-    # Verify class distribution in the balanced subset
-    balanced_labels = []
-    for _, labels in balanced_test_loader:
-        balanced_labels.extend(labels.cpu().numpy())
-    balanced_counts = Counter(balanced_labels)
-    logging.info(f"Class distribution in balanced test subset: {balanced_counts}")
+    # Use 50 random examples from the balanced test loader
+    all_data = []
+    all_labels = []
+    for data, labels in balanced_test_loader:
+        all_data.append(data)
+        all_labels.append(labels)
 
+    all_data = torch.cat(all_data)
+    all_labels = torch.cat(all_labels)
 
-    # Evaluate the model on the balanced test data
-    logging.info("Evaluating on balanced clean test data...")
-    test_loss, test_acc, y_true, y_pred = evaluate_with_predictions(model, balanced_test_loader, nn.CrossEntropyLoss(), device)
-    logging.info(f"Balanced Test Accuracy: {test_acc:.4f}")
+    # Randomly select 50 examples
+    indices = random.sample(range(len(all_data)), 50)
+    selected_data = all_data[indices]
+    selected_labels = all_labels[indices]
+
+    logging.info(f"Selected 50 random examples from the balanced test set.")
+
+    # Evaluate the model on the selected clean test data
+    logging.info("Evaluating on selected clean test data...")
+    selected_loader = torch.utils.data.DataLoader(
+        torch.utils.data.TensorDataset(selected_data, selected_labels),
+        batch_size=config['batch_size'],
+        shuffle=False
+    )
+    test_loss, test_acc, y_true, y_pred = evaluate_with_predictions(model, selected_loader, nn.CrossEntropyLoss(), device)
+    logging.info(f"Selected Test Accuracy: {test_acc:.4f}")
 
     # Initialize PSO attack
-    max_iter = 100  
-    swarm_size = 150  
-    epsilon = 0.3
+    max_iter = 20  
+    swarm_size = 10  
+    epsilon = 0.9
     c1 = 0.7
     c2 = 0.7
     w_max = 0.9
     w_min = 0.1
-    patience = 50
-    mutation_rate = 0.5
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     pso_attack = PSOAttack(
@@ -159,70 +165,70 @@ def evaluate_attack_on_folds(config):
         c2=c2,
         w_max=w_max,
         w_min=w_min,
-        patience=patience,
-        mutation_rate=mutation_rate,
         device=device
     )
 
-    # Detailed logging of the PSO attack hyperparameters
-    logging.info(
-        f"Initialized PSO attack with the following hyperparameters:\n"
-        f"\tmax_iter = {max_iter}\n"
-        f"\tswarm_size = {swarm_size}\n"
-        f"\tepsilon = {epsilon}\n"
-        f"\tc1 (cognitive weight) = {c1}\n"
-        f"\tc2 (social weight) = {c2}\n"
-        f"\tw_max (maximum inertia weight) = {w_max}\n"
-        f"\tw_min (minimum inertia weight) = {w_min}\n"
-        f"\tpatience = {patience}\n"
-        f"\tmutation_rate = {mutation_rate}\n"
-        f"\tdevice = {device}"
-    )
+    # Initialize a list to store attack metrics
+    attack_metrics = []
 
-
-    # Initialize counters for the number of adversarial examples per class
-    adversarial_counts = {label: 0 for label in range(config['num_classes'])}
-    max_samples_per_class = 60
-
-    # Apply PSO attack to the specified test folds
-    logging.info(f"Generating adversarial examples using PSO attack on Folds {test_folds}...")
+    # Apply PSO attack on the selected examples
+    logging.info("Generating adversarial examples using PSO attack on selected examples...")
     adversarial_examples = []
     original_labels = []
 
-    for data, labels in balanced_test_loader:
-        data, labels = data.to(device), labels.to(device)
-        if data.dim() == 3:
-            data = data.unsqueeze(1)
+    for i in tqdm(range(len(selected_data))):
+        original_audio = selected_data[i].cpu().numpy().squeeze()
+        current_label = selected_labels[i].item()
 
-        for i in range(len(data)):
-            original_audio = data[i].cpu().numpy().squeeze()
-            current_label = labels[i].item()
+        # Select a random target label different from the current label
+        target_label = random.choice([label for label in range(config['num_classes']) if label != current_label])
 
-            # Skip this example if we already have enough adversarial samples for this class
-            if adversarial_counts[current_label] >= max_samples_per_class:
-                continue
+        # Starting confidence and class
+        starting_confidence = pso_attack.fitness_score(original_audio, current_label)
+        starting_class = current_label
 
-            # Select a valid target label different from the current label
-            available_classes = list(label_counts.keys())
-            available_classes.remove(current_label)
-            target_label = random.choice(available_classes)
+        # Perform PSO attack
+        adv_example, iterations, final_confidence = pso_attack.attack(original_audio, target_label)
 
-            adv_example = pso_attack.attack(original_audio, target_label)
+        # Determine success or failure
+        success = adv_example is not None
+        final_class = target_label if success else current_label
 
-            if adv_example is not None:
-                adversarial_examples.append(adv_example)
-                original_labels.append(current_label)
-                adversarial_counts[current_label] += 1
+        # Compute SNR (Signal-to-Noise Ratio)
+        if success:
+            noise = adv_example - original_audio
+            snr = 10 * np.log10(np.sum(original_audio ** 2) / np.sum(noise ** 2))
+        else:
+            snr = float('inf')  # Infinite SNR if no perturbation is made
 
-            # Stop generating examples if we have reached the limit for all classes
-            if all(count >= max_samples_per_class for count in adversarial_counts.values()):
-                break
+        # Store metrics
+        attack_metrics.append([
+            "Success" if success else "Failure",
+            starting_confidence,
+            final_confidence,
+            iterations,
+            snr,
+            starting_class,
+            final_class,
+            iterations * pso_attack.swarm_size  # Queries = iterations * swarm size
+        ])
 
-        if all(count >= max_samples_per_class for count in adversarial_counts.values()):
-            break
+        # Store the adversarial example if found
+        if success:
+            adversarial_examples.append(adv_example)
+            original_labels.append(current_label)
 
     logging.info(f"Generated a total of {len(adversarial_examples)} adversarial examples.")
 
+    # Write attack metrics to CSV
+    csv_file = f"50_results_{epsilon}.csv"
+    with open(csv_file, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(["Success/Failure", "Starting Confidence", "Final Confidence",
+                         "Iterations", "SNR", "Starting Class", "Final Class", "Queries"])
+        writer.writerows(attack_metrics)
+
+    logging.info(f"Attack metrics saved to {csv_file}.")
 
     # Evaluate the model on adversarial examples
     logging.info("Evaluating on adversarial examples...")
@@ -230,9 +236,6 @@ def evaluate_attack_on_folds(config):
     adv_loss, adv_acc, y_true_adv, y_pred_adv = evaluate_with_predictions(model, adversarial_loader, nn.CrossEntropyLoss(), device)
     logging.info(f"Adversarial Test Accuracy: {adv_acc:.4f}")
 
-    # Generate classification report
-    report = classification_report(y_true_adv, y_pred_adv, target_names=[str(i) for i in range(config['num_classes'])], zero_division=0)
-    logging.info(f"Adversarial Classification Report:\n{report}")
 
 def create_adversarial_loader(adversarial_examples, original_labels, batch_size, device):
     adversarial_data = torch.tensor(adversarial_examples, dtype=torch.float32).unsqueeze(1).to(device)

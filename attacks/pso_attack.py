@@ -56,6 +56,10 @@ class PSOAttack:
         return np.clip(particle + mutation, -1.0, 1.0)
 
     def attack(self, original_audio, target_label):
+        """
+        Perform the PSO attack to generate an adversarial example.
+        """
+        # Initialize particles and velocities
         particles, velocities = self.initialize_particles(original_audio)
         personal_best = np.copy(particles)
         global_best = np.copy(particles[np.argmax([self.fitness_score(p, target_label) for p in particles])])
@@ -63,15 +67,16 @@ class PSOAttack:
         personal_best_scores = [self.fitness_score(p, target_label) for p in particles]
         global_best_score = max(personal_best_scores)
 
-        no_improvement = 0
-
+        # Main optimization loop
         for iteration in range(self.max_iter):
             w = self.w_max - (iteration / self.max_iter) * (self.w_max - self.w_min)
 
             for i in range(self.swarm_size):
+                # Update velocity and position of each particle
                 velocities[i] = self.update_velocity(velocities[i], particles[i], personal_best[i], global_best, w, self.c1, self.c2)
                 particles[i] = self.clip_audio(particles[i] + velocities[i], original_audio, self.epsilon)
 
+                # Evaluate fitness
                 score = self.fitness_score(particles[i], target_label)
                 if score > personal_best_scores[i]:
                     personal_best[i] = np.copy(particles[i])
@@ -80,28 +85,15 @@ class PSOAttack:
                 if score > global_best_score:
                     global_best = np.copy(particles[i])
                     global_best_score = score
-                    no_improvement = 0  # Reset if improvement found
 
             print(f"Iteration {iteration + 1}/{self.max_iter}, Best Fitness Score: {global_best_score:.4f}")
-            print(f"Sample Particle Scores: {[round(score, 4) for score in personal_best_scores[:5]]}")
 
-            # Apply mutation if no improvement over 3/4 of the patience period
-            if no_improvement >= 3 * self.patience // 4:
-                print("Applying mutation to escape local minima.")
-                temp_particles = [self.mutate_particle(p) for p in personal_best[:self.swarm_size // 4]]
-                particles[:len(temp_particles)] = temp_particles
-
-            # Early stopping if no improvement for the patience period
-            if no_improvement >= self.patience:
-                print("Early stopping due to no improvement.")
-                break
-
-            # Check for adversarial example with a significant improvement threshold
-            if global_best_score > 0.1:  # Adjust threshold as needed
+            # Check if an adversarial example is found
+            if global_best_score > 0:
                 print("Adversarial example found!")
-                return global_best
-
-            no_improvement += 1
+                final_confidence = global_best_score
+                return global_best, iteration + 1, final_confidence
 
         print("Failed to find an adversarial example within the maximum iterations.")
-        return None
+        return None, self.max_iter, global_best_score
+
