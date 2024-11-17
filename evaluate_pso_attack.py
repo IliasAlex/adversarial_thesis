@@ -246,18 +246,18 @@ def evaluate_attack_on_folds(config):
 
     logging.info(f"Attack metrics saved to {csv_file}.")
 
-    # Evaluate the model on adversarial examples
-    logging.info("Evaluating on adversarial examples...")
-    adversarial_loader = create_adversarial_loader(adversarial_examples, original_labels, config['batch_size'], device)
-    adv_loss, adv_acc, y_true_adv, y_pred_adv = evaluate_with_predictions(model, adversarial_loader, nn.CrossEntropyLoss(), device)
-    logging.info(f"Adversarial Test Accuracy: {adv_acc:.4f}")
+    total_attacks = len(attack_metrics)
+    successful_attacks = sum(1 for m in attack_metrics if m[0] == "Success")
+    avg_snr = np.mean([m[5] for m in attack_metrics if m[0] == "Success"])
+    avg_iterations = np.mean([m[4] for m in attack_metrics if m[0] == "Success"])
 
+    success_rate = (successful_attacks / total_attacks) * 100 if total_attacks > 0 else 0
 
-def create_adversarial_loader(adversarial_examples, original_labels, batch_size, device):
-    adversarial_data = torch.tensor(adversarial_examples, dtype=torch.float32).unsqueeze(1).to(device)
-    adversarial_labels = torch.tensor(original_labels, dtype=torch.long).to(device)
-    dataset = TensorDataset(adversarial_data, adversarial_labels)
-    return DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    logging.info(f"Total Attacks: {total_attacks}")
+    logging.info(f"Successful Attacks: {successful_attacks}")
+    logging.info(f"Success Rate: {success_rate:.2f}%")
+    logging.info(f"Average SNR of Successful Attacks: {avg_snr:.4f} dB")
+    logging.info(f"Average Iterations of Successful Attacks: {avg_iterations:.2f}")
 
 def evaluate_with_predictions(model, data_loader, criterion, device):
     model.eval()
