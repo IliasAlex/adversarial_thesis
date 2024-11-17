@@ -149,7 +149,7 @@ def evaluate_attack_on_folds(config):
     # Initialize PSO attack
     max_iter = 20  
     swarm_size = 10  
-    epsilon = 0.9
+    epsilon = 0.3
     c1 = 0.7
     c2 = 0.7
     w_max = 0.9
@@ -180,22 +180,30 @@ def evaluate_attack_on_folds(config):
         original_audio = selected_data[i].cpu().numpy().squeeze()
         current_label = selected_labels[i].item()
 
-        # Select a random target label different from the current label
-        target_label = random.choice([label for label in range(config['num_classes']) if label != current_label])
-
         # Starting confidence and class
         starting_confidence = pso_attack.fitness_score(original_audio, current_label)
         starting_class = current_label
 
-        # Perform PSO attack
-        adv_example, iterations, final_confidence = pso_attack.attack(original_audio, target_label)
+        # Perform PSO attack without specifying a target label (non-targeted)
+        adv_example, iterations, final_confidence = pso_attack.attack(original_audio, current_label)
 
         # Determine success or failure
         success = adv_example is not None
-        final_class = target_label if success else current_label
+        if success:
+            # Check the final prediction of the adversarial example
+            adv_audio_tensor = torch.tensor(adv_example, dtype=torch.float32).to(device).unsqueeze(0).unsqueeze(0)
+            with torch.no_grad():
+                final_outputs = model(adv_audio_tensor)
+                final_prediction = final_outputs.argmax(dim=1).item()
+            final_class = final_prediction
+        else:
+            final_class = current_label
+
+        # Determine if the attack was successful
+        attack_success = success and (final_class != current_label)
 
         # Compute SNR (Signal-to-Noise Ratio)
-        if success:
+        if attack_success:
             noise = adv_example - original_audio
             snr = 10 * np.log10(np.sum(original_audio ** 2) / np.sum(noise ** 2))
         else:
@@ -203,7 +211,7 @@ def evaluate_attack_on_folds(config):
 
         # Store metrics
         attack_metrics.append([
-            "Success" if success else "Failure",
+            "Success" if attack_success else "Failure",
             starting_confidence,
             final_confidence,
             iterations,
@@ -213,10 +221,11 @@ def evaluate_attack_on_folds(config):
             iterations * pso_attack.swarm_size  # Queries = iterations * swarm size
         ])
 
-        # Store the adversarial example if found
-        if success:
+        # Store the adversarial example if the attack was successful
+        if attack_success:
             adversarial_examples.append(adv_example)
             original_labels.append(current_label)
+
 
     logging.info(f"Generated a total of {len(adversarial_examples)} adversarial examples.")
 

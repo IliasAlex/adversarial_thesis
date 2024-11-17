@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import random
 
 class PSOAttack:
-    def __init__(self, model, max_iter=100, swarm_size=150, epsilon=0.1, c1=2.0, c2=2.0, w_max=1.0, w_min=0.3, patience=20, mutation_rate=0.2, device='cuda'):
+    def __init__(self, model, max_iter=20, swarm_size=10, epsilon=0.3, c1=0.7, c2=0.7, w_max=0.9, w_min=0.1, device='cuda'):
         self.model = model.to(device)
         self.max_iter = max_iter
         self.swarm_size = swarm_size
@@ -13,22 +13,28 @@ class PSOAttack:
         self.c2 = c2
         self.w_max = w_max
         self.w_min = w_min
-        self.patience = patience
-        self.mutation_rate = mutation_rate
         self.device = device
 
-    def fitness_score(self, audio, target_label):
+    def fitness_score(self, audio, original_label):
         """
-        Compute the fitness score based on the model's prediction.
+        Compute the fitness score for a non-targeted attack.
+        The score is higher when the model predicts any class other than the original label.
         """
         self.model.eval()
         with torch.no_grad():
             audio_tensor = torch.tensor(audio, dtype=torch.float32).to(self.device).unsqueeze(0).unsqueeze(0)
             outputs = self.model(audio_tensor)
             logits = F.softmax(outputs, dim=1)
-            target_confidence = logits[0, target_label].item()
-            other_confidence = logits[0].max().item() if logits[0].argmax() != target_label else 0
-            return target_confidence - other_confidence
+
+            # Confidence for the original class
+            original_confidence = logits[0, original_label].item()
+
+            # Maximum confidence for any class other than the original class
+            other_confidence = logits[0].max().item() if logits[0].argmax() != original_label else logits[0].topk(2).values[1].item()
+
+            # Fitness score: penalize high confidence in the original class
+            return other_confidence - original_confidence
+
 
     def initialize_particles(self, original_audio):
         particles = []
@@ -55,16 +61,16 @@ class PSOAttack:
         mutation = np.random.uniform(-self.mutation_rate, self.mutation_rate, size=particle.shape)
         return np.clip(particle + mutation, -1.0, 1.0)
 
-    def attack(self, original_audio, target_label):
+    def attack(self, original_audio, original_label):
         """
-        Perform the PSO attack to generate an adversarial example.
+        Perform the PSO attack to generate a non-targeted adversarial example.
         """
         # Initialize particles and velocities
         particles, velocities = self.initialize_particles(original_audio)
         personal_best = np.copy(particles)
-        global_best = np.copy(particles[np.argmax([self.fitness_score(p, target_label) for p in particles])])
+        global_best = np.copy(particles[np.argmax([self.fitness_score(p, original_label) for p in particles])])
 
-        personal_best_scores = [self.fitness_score(p, target_label) for p in particles]
+        personal_best_scores = [self.fitness_score(p, original_label) for p in particles]
         global_best_score = max(personal_best_scores)
 
         # Main optimization loop
@@ -77,7 +83,7 @@ class PSOAttack:
                 particles[i] = self.clip_audio(particles[i] + velocities[i], original_audio, self.epsilon)
 
                 # Evaluate fitness
-                score = self.fitness_score(particles[i], target_label)
+                score = self.fitness_score(particles[i], original_label)
                 if score > personal_best_scores[i]:
                     personal_best[i] = np.copy(particles[i])
                     personal_best_scores[i] = score
@@ -96,4 +102,3 @@ class PSOAttack:
 
         print("Failed to find an adversarial example within the maximum iterations.")
         return None, self.max_iter, global_best_score
-
