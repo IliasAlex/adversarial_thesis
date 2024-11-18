@@ -34,7 +34,26 @@ class PSOAttack:
 
             # Fitness score: penalize high confidence in the original class
             return other_confidence - original_confidence
+        
+    def fitness_score_targeted(self, audio, target_class):
+        """
+        Compute the fitness score for a targeted attack.
+        The score is higher when the model predicts the target class with higher confidence.
+        """
+        self.model.eval()
+        with torch.no_grad():
+            audio_tensor = torch.tensor(audio, dtype=torch.float32).to(self.device).unsqueeze(0).unsqueeze(0)
+            outputs = self.model(audio_tensor)
+            logits = F.softmax(outputs, dim=1)
 
+            # Confidence for the target class
+            target_confidence = logits[0, target_class].item()
+
+            # Maximum confidence for any other class
+            other_confidence = logits[0].max().item() if logits[0].argmax() != target_class else logits[0].topk(2).values[1].item()
+
+            # Fitness score: maximize confidence in the target class
+            return target_confidence - other_confidence
 
     def initialize_particles(self, original_audio):
         particles = []
@@ -61,17 +80,25 @@ class PSOAttack:
         mutation = np.random.uniform(-self.mutation_rate, self.mutation_rate, size=particle.shape)
         return np.clip(particle + mutation, -1.0, 1.0)
 
-    def attack(self, original_audio, original_label):
+    def attack(self, original_audio, original_label, target_class=None):
         """
-        Perform the PSO attack to generate a non-targeted adversarial example.
+        Perform the PSO attack to generate an adversarial example.
+        If target_class is provided, it performs a targeted attack.
+        Otherwise, it performs a non-targeted attack.
         """
         # Initialize particles and velocities
         particles, velocities = self.initialize_particles(original_audio)
         personal_best = np.copy(particles)
-        global_best = np.copy(particles[np.argmax([self.fitness_score(p, original_label) for p in particles])])
 
-        personal_best_scores = [self.fitness_score(p, original_label) for p in particles]
-        global_best_score = max(personal_best_scores)
+        # Determine the initial global best based on the type of attack
+        if target_class is None:
+            global_best = np.copy(particles[np.argmax([self.fitness_score(p, original_label) for p in particles])])
+            personal_best_scores = [self.fitness_score(p, original_label) for p in particles]
+            global_best_score = max(personal_best_scores)
+        else:
+            global_best = np.copy(particles[np.argmax([self.fitness_score_targeted(p, target_class) for p in particles])])
+            personal_best_scores = [self.fitness_score_targeted(p, target_class) for p in particles]
+            global_best_score = max(personal_best_scores)
 
         # Main optimization loop
         for iteration in range(self.max_iter):
@@ -82,12 +109,18 @@ class PSOAttack:
                 velocities[i] = self.update_velocity(velocities[i], particles[i], personal_best[i], global_best, w, self.c1, self.c2)
                 particles[i] = self.clip_audio(particles[i] + velocities[i], original_audio, self.epsilon)
 
-                # Evaluate fitness
-                score = self.fitness_score(particles[i], original_label)
+                # Evaluate fitness based on attack type
+                if target_class is None:
+                    score = self.fitness_score(particles[i], original_label)
+                else:
+                    score = self.fitness_score_targeted(particles[i], target_class)
+
+                # Update personal best
                 if score > personal_best_scores[i]:
                     personal_best[i] = np.copy(particles[i])
                     personal_best_scores[i] = score
 
+                # Update global best
                 if score > global_best_score:
                     global_best = np.copy(particles[i])
                     global_best_score = score
@@ -95,8 +128,12 @@ class PSOAttack:
             print(f"Iteration {iteration + 1}/{self.max_iter}, Best Fitness Score: {global_best_score:.4f}")
 
             # Check if an adversarial example is found
-            if global_best_score > 0:
-                print("Adversarial example found!")
+            if target_class is None and global_best_score > 0:
+                print("Non-targeted adversarial example found!")
+                final_confidence = global_best_score
+                return global_best, iteration + 1, final_confidence
+            elif target_class is not None and global_best_score > 0:
+                print("Targeted adversarial example found!")
                 final_confidence = global_best_score
                 return global_best, iteration + 1, final_confidence
 
