@@ -13,6 +13,7 @@ from datasets.datasets import get_data_loaders
 from models.models import BaselineCNN
 from loops.trainer import train
 from attacks.pso_attack import PSOAttack
+from utils.utils import toUrbanClass
 
 def setup_logging():
     logging.basicConfig(
@@ -23,25 +24,13 @@ def setup_logging():
     )
     logging.getLogger().addHandler(logging.StreamHandler())
 
-def load_or_train_model(config, train_loader, val_loader, device):
+def load_model(config, device):
     model = BaselineCNN(num_classes=config['num_classes']).to(device)
 
     if config['model_path'] is not None:
         logging.info(f"Loading pre-trained model from {config['model_path']}")
         model.load_state_dict(torch.load(config['model_path'], map_location=device))
         model.eval()
-    else:
-        logging.info("No pre-trained model specified. Training a new model.")
-        criterion = nn.CrossEntropyLoss().to(device)
-        optimizer = optim.Adam(model.parameters(), lr=config['learning_rate'])
-
-        # Train the model
-        model = train(model, train_loader, val_loader, criterion, optimizer, config['num_epochs'], device)
-        
-        # Save the trained model
-        save_path = "trained_baseline_cnn.pth"
-        torch.save(model.state_dict(), save_path)
-        logging.info(f"Model trained and saved to {save_path}")
 
     return model
 
@@ -102,12 +91,12 @@ def evaluate_attack_on_folds(config):
 
     # Load data loaders
     data_csv = f"{config['data_dir']}/UrbanSound8K.csv"
-    train_loader, val_loader, test_loader = get_data_loaders(
+    _, _, test_loader = get_data_loaders(
         data_csv, config['data_dir'], train_folds, [val_fold], test_folds, batch_size=config['batch_size']
     )
 
     # Load or train the model
-    model = load_or_train_model(config, train_loader, val_loader, device)
+    model = load_model(config, device)
 
     # Create a balanced subset for testing
     balanced_test_loader, file_paths = create_balanced_subset(test_loader, model, device, sample_size=50)
@@ -142,36 +131,28 @@ def evaluate_attack_on_folds(config):
     logging.info(f"Selected Test Accuracy: {test_acc:.4f}")
 
     # Initialize PSO attack
-    max_iter = 20  
-    swarm_size = 10  
-    epsilon = 0.9
-    c1 = 0.7
-    c2 = 0.7
-    w_max = 0.9
-    w_min = 0.1
-
     pso_attack = PSOAttack(
         model=model,
-        max_iter=max_iter,
-        swarm_size=swarm_size,
-        epsilon=epsilon,
-        c1=c1,
-        c2=c2,
-        w_max=w_max,
-        w_min=w_min,
+        max_iter=config['max_iter'],
+        swarm_size=config['swarm_size'],
+        epsilon=config['epsilon'],
+        c1=config['c1'],
+        c2=config['c2'],
+        w_max=config['w_max'],
+        w_min=config['w_min'],
         device=device
     )
 
     # Detailed logging of the PSO attack hyperparameters
     logging.info(
         f"Initialized PSO attack with hyperparameters:\n"
-        f"\tmax_iter = {max_iter}\n"
-        f"\tswarm_size = {swarm_size}\n"
-        f"\tepsilon = {epsilon}\n"
-        f"\tc1 = {c1}\n"
-        f"\tc2 = {c2}\n"
-        f"\tw_max = {w_max}\n"
-        f"\tw_min = {w_min}"
+        f"\tmax_iter = {config['max_iter']}\n"
+        f"\tswarm_size = {config['swarm_size']}\n"
+        f"\tepsilon = {config['epsilon']}\n"
+        f"\tc1 = {config['c1']}\n"
+        f"\tc2 = {config['c2']}\n"
+        f"\tw_max = {config['w_max']}\n"
+        f"\tw_min = {config['w_min']}"
     )
 
     # Initialize a list to store attack metrics
@@ -224,8 +205,8 @@ def evaluate_attack_on_folds(config):
             final_confidence,
             iterations,
             snr,
-            starting_class,
-            final_class,
+            toUrbanClass(starting_class),
+            toUrbanClass(final_class),
             iterations * pso_attack.swarm_size  # Queries = iterations * swarm size
         ])
 
@@ -237,7 +218,7 @@ def evaluate_attack_on_folds(config):
     logging.info(f"Generated a total of {len(adversarial_examples)} adversarial examples.")
 
     # Write attack metrics to CSV
-    csv_file = f"50_results_{epsilon}.csv"
+    csv_file = f"50_results_{config['epsilon']}.csv"
     with open(csv_file, mode='w', newline='') as file:
         writer = csv.writer(file)
         writer.writerow(["Success/Failure", "File Path", "Starting Confidence", "Final Confidence",

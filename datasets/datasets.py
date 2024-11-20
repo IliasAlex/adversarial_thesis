@@ -15,7 +15,7 @@ class UrbanSound8KDataset(Dataset):
 
         # Filter annotations to include only the specified folds
         self.annotations = self.annotations[self.annotations['fold'].isin(self.folds)]
-
+        
     def __len__(self):
         return len(self.annotations)
 

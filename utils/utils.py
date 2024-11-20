@@ -25,3 +25,7 @@ def setup_logging():
         level=logging.INFO
     )
     logging.getLogger().addHandler(logging.StreamHandler())
+
+def toUrbanClass(id):
+    classes = ["air_conditioner", "car_horn", "children_playing", "dog_bark", "drilling", "engine_idling", "gun_shot", "jackhammer", "siren", "street_music"]
+    return classes[id]
