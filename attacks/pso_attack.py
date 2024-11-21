@@ -14,6 +14,7 @@ class PSOAttack:
         self.w_max = w_max
         self.w_min = w_min
         self.device = device
+        self.counter = 0
 
     def fitness_score(self, audio, original_label):
         """
@@ -55,16 +56,29 @@ class PSOAttack:
             # Fitness score: maximize confidence in the target class
             return target_confidence - other_confidence
 
+    # def initialize_particles(self, original_audio):
+    #     particles = []
+    #     velocities = []
+    #     for _ in range(self.swarm_size):
+    #         noise = np.random.uniform(-self.epsilon, self.epsilon, size=original_audio.shape)
+    #         particle = np.clip(original_audio + noise, -1.0, 1.0)
+    #         velocity = np.zeros_like(original_audio)
+    #         particles.append(particle)
+    #         velocities.append(velocity)
+    #     return np.array(particles), np.array(velocities)
+    
     def initialize_particles(self, original_audio):
         particles = []
         velocities = []
         for _ in range(self.swarm_size):
-            noise = np.random.uniform(-self.epsilon, self.epsilon, size=original_audio.shape)
+            noise = np.random.uniform(-1, 1, size=original_audio.shape) * self.epsilon
             particle = np.clip(original_audio + noise, -1.0, 1.0)
             velocity = np.zeros_like(original_audio)
             particles.append(particle)
             velocities.append(velocity)
+            
         return np.array(particles), np.array(velocities)
+
 
     def update_velocity(self, velocity, particle, personal_best, global_best, w, c1, c2):
         r1, r2 = random.random(), random.random()

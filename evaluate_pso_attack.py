@@ -13,7 +13,9 @@ from datasets.datasets import get_data_loaders
 from models.models import BaselineCNN
 from loops.trainer import train
 from attacks.pso_attack import PSOAttack
-from utils.utils import toUrbanClass
+from utils.utils import toUrbanClass, calculate_snr
+import os
+import soundfile as sf
 
 def setup_logging():
     logging.basicConfig(
@@ -157,6 +159,12 @@ def evaluate_attack_on_folds(config):
 
     # Initialize a list to store attack metrics
     attack_metrics = []
+    snr_values = []
+
+    # Initialize the folder for saving audio
+    save_folder = "/home/ilias/projects/adversarial_thesis/data"
+    os.makedirs(save_folder, exist_ok=True)
+    num_saved = 0  # Counter for saved samples
 
     # Apply PSO attack on the selected examples
     logging.info("Generating adversarial examples using PSO attack on selected examples...")
@@ -193,7 +201,8 @@ def evaluate_attack_on_folds(config):
         # Compute SNR (Signal-to-Noise Ratio)
         if attack_success:
             noise = adv_example - original_audio
-            snr = 10 * np.log10(np.sum(original_audio ** 2) / np.sum(noise ** 2))
+            snr = calculate_snr(original_audio, noise)
+            snr_values.append(snr)
         else:
             snr = float('inf')  # Infinite SNR if no perturbation is made
 
@@ -210,12 +219,15 @@ def evaluate_attack_on_folds(config):
             iterations * pso_attack.swarm_size  # Queries = iterations * swarm size
         ])
 
-        # Store the adversarial example if the attack was successful
-        if attack_success:
-            adversarial_examples.append(adv_example)
-            original_labels.append(current_label)
 
-    logging.info(f"Generated a total of {len(adversarial_examples)} adversarial examples.")
+        # Save adversarial and original samples if specified
+        if num_saved < config['save_sample']:
+            adv_save_path = os.path.join(save_folder, f"adv_{num_saved}_{toUrbanClass(final_class)}.wav")
+            orig_save_path = os.path.join(save_folder, f"orig_{num_saved}_{toUrbanClass(starting_class)}.wav")
+            sf.write(orig_save_path, original_audio.flatten(), samplerate=22050)
+            if attack_success:
+                sf.write(adv_save_path, adv_example.flatten(), samplerate=22050)
+                num_saved += 1
 
     # Write attack metrics to CSV
     csv_file = f"50_results_{config['epsilon']}.csv"
@@ -229,7 +241,8 @@ def evaluate_attack_on_folds(config):
 
     total_attacks = len(attack_metrics)
     successful_attacks = sum(1 for m in attack_metrics if m[0] == "Success")
-    avg_snr = np.mean([m[5] for m in attack_metrics if m[0] == "Success"])
+    avg_snr = np.mean(snr_values) if snr_values else float('nan')
+    snr_std_dev = np.std(snr_values) if snr_values else float('nan')
     avg_iterations = np.mean([m[4] for m in attack_metrics if m[0] == "Success"])
 
     success_rate = (successful_attacks / total_attacks) * 100 if total_attacks > 0 else 0
@@ -237,7 +250,7 @@ def evaluate_attack_on_folds(config):
     logging.info(f"Total Attacks: {total_attacks}")
     logging.info(f"Successful Attacks: {successful_attacks}")
     logging.info(f"Success Rate: {success_rate:.2f}%")
-    logging.info(f"Average SNR of Successful Attacks: {avg_snr:.4f} dB")
+    logging.info(f"Average SNR of Successful Attacks: {avg_snr:.4f} dB (± {snr_std_dev:.4f})")
     logging.info(f"Average Iterations of Successful Attacks: {avg_iterations:.2f}")
 
 def evaluate_with_predictions(model, data_loader, criterion, device):
