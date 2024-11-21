@@ -37,7 +37,7 @@ def cross_validate(config):
 
         data_csv = f"{config['data_dir']}/UrbanSound8K.csv"
         train_loader, val_loader, test_loader = get_data_loaders(
-            data_csv, config['data_dir'], train_folds, [val_fold], [test_fold], batch_size=config['batch_size']
+            data_csv, config['data_dir'], train_folds, [val_fold], [test_fold], batch_size=config['batch_size'], mode='train'
         )
 
         # Initialize model, criterion, and optimizer

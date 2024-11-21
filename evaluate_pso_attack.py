@@ -1,21 +1,19 @@
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import numpy as np
 import logging
 from tqdm.auto import tqdm
 import csv
-from sklearn.metrics import classification_report
-from collections import Counter
-from torch.utils.data import Subset, DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset
 import random
 from datasets.datasets import get_data_loaders
 from models.models import BaselineCNN
 from loops.trainer import train
 from attacks.pso_attack import PSOAttack
-from utils.utils import toUrbanClass, calculate_snr
+from utils.utils import toUrbanClass, calculate_snr, extract_mel_spectrogram
 import os
 import soundfile as sf
+
 
 def setup_logging():
     logging.basicConfig(
@@ -25,6 +23,7 @@ def setup_logging():
         level=logging.INFO
     )
     logging.getLogger().addHandler(logging.StreamHandler())
+
 
 def load_model(config, device):
     model = BaselineCNN(num_classes=config['num_classes']).to(device)
@@ -36,9 +35,11 @@ def load_model(config, device):
 
     return model
 
+
 def create_balanced_subset(test_loader, model, device, sample_size=50):
     """
     Create a balanced subset with correctly classified samples and include file paths.
+    This version expects waveform inputs and transforms them to mel-spectrograms before feeding to the model.
     """
     model.eval()
     selected_data = []
@@ -47,18 +48,17 @@ def create_balanced_subset(test_loader, model, device, sample_size=50):
     correct_indices_per_class = {label: [] for label in range(model.fc2.out_features)}
 
     with torch.no_grad():
-        for data, labels, file_paths in test_loader:
-            data, labels = data.to(device), labels.to(device)
-            if data.dim() == 3:
-                data = data.unsqueeze(1)
+        for waveforms, labels, file_paths in test_loader:
+            batch_spectrograms = torch.stack([extract_mel_spectrogram(waveform.numpy()) for waveform in waveforms])
 
-            outputs = model(data)
+            # Forward pass through the model
+            outputs = model(batch_spectrograms.to(device))
             _, predicted = outputs.max(1)
 
             # Store only correctly classified samples
-            for i in range(len(data)):
+            for i in range(len(waveforms)):
                 if predicted[i].item() == labels[i].item():
-                    correct_indices_per_class[labels[i].item()].append((data[i], labels[i], file_paths[i]))
+                    correct_indices_per_class[labels[i].item()].append((waveforms[i], labels[i], file_paths[i]))
 
     # Select a balanced subset of correctly classified samples
     for label, samples in correct_indices_per_class.items():
@@ -67,14 +67,14 @@ def create_balanced_subset(test_loader, model, device, sample_size=50):
         else:
             selected_samples = samples
 
-        for data, label, file_path in selected_samples:
-            selected_data.append(data)
+        for waveform, label, file_path in selected_samples:
+            selected_data.append(waveform)
             selected_labels.append(label)
             selected_file_paths.append(file_path)
 
     logging.info(f"Selected {len(selected_data)} samples for balanced evaluation with correctly classified samples.")
 
-    # Create a TensorDataset and DataLoader
+    # Return waveforms and labels directly
     dataset = TensorDataset(torch.stack(selected_data), torch.stack(selected_labels))
     return DataLoader(dataset, batch_size=32, shuffle=False), selected_file_paths
 
@@ -94,11 +94,17 @@ def evaluate_attack_on_folds(config):
     # Load data loaders
     data_csv = f"{config['data_dir']}/UrbanSound8K.csv"
     _, _, test_loader = get_data_loaders(
-        data_csv, config['data_dir'], train_folds, [val_fold], test_folds, batch_size=config['batch_size']
+        data_csv, config['data_dir'], train_folds, [val_fold], test_folds, batch_size=config['batch_size'], mode='attack'
     )
 
     # Load or train the model
     model = load_model(config, device)
+
+    # Experiment with different epsilon values
+    epsilon = config["epsilon"]
+    results = {}
+
+    logging.info(f"Experimenting with epsilon = {epsilon}")
 
     # Create a balanced subset for testing
     balanced_test_loader, file_paths = create_balanced_subset(test_loader, model, device, sample_size=50)
@@ -129,7 +135,7 @@ def evaluate_attack_on_folds(config):
         batch_size=config['batch_size'],
         shuffle=False
     )
-    test_loss, test_acc, y_true, y_pred = evaluate_with_predictions(model, selected_loader, nn.CrossEntropyLoss(), device)
+    test_loss, test_acc = evaluate_with_predictions(model, selected_loader, nn.CrossEntropyLoss(), device)
     logging.info(f"Selected Test Accuracy: {test_acc:.4f}")
 
     # Initialize PSO attack
@@ -137,7 +143,7 @@ def evaluate_attack_on_folds(config):
         model=model,
         max_iter=config['max_iter'],
         swarm_size=config['swarm_size'],
-        epsilon=config['epsilon'],
+        epsilon=epsilon,  # Set epsilon value for this experiment
         c1=config['c1'],
         c2=config['c2'],
         w_max=config['w_max'],
@@ -145,31 +151,15 @@ def evaluate_attack_on_folds(config):
         device=device
     )
 
-    # Detailed logging of the PSO attack hyperparameters
-    logging.info(
-        f"Initialized PSO attack with hyperparameters:\n"
-        f"\tmax_iter = {config['max_iter']}\n"
-        f"\tswarm_size = {config['swarm_size']}\n"
-        f"\tepsilon = {config['epsilon']}\n"
-        f"\tc1 = {config['c1']}\n"
-        f"\tc2 = {config['c2']}\n"
-        f"\tw_max = {config['w_max']}\n"
-        f"\tw_min = {config['w_min']}"
-    )
-
-    # Initialize a list to store attack metrics
-    attack_metrics = []
-    snr_values = []
-
-    # Initialize the folder for saving audio
-    save_folder = "/home/ilias/projects/adversarial_thesis/data"
-    os.makedirs(save_folder, exist_ok=True)
-    num_saved = 0  # Counter for saved samples
-
-    # Apply PSO attack on the selected examples
     logging.info("Generating adversarial examples using PSO attack on selected examples...")
     adversarial_examples = []
-    original_labels = []
+    # Initialize a list to store attack metrics
+    attack_metrics = []
+
+    # Setup saving for adversarial examples
+    save_folder = config['save_folder']
+    os.makedirs(save_folder, exist_ok=True)
+    num_saved = 0
 
     for i in tqdm(range(len(selected_data))):
         original_audio = selected_data[i].cpu().numpy().squeeze()
@@ -178,107 +168,111 @@ def evaluate_attack_on_folds(config):
 
         # Starting confidence and class
         starting_confidence = pso_attack.fitness_score(original_audio, current_label)
-        starting_class = current_label
 
-        # Perform PSO attack without specifying a target label (non-targeted)
+        # Perform PSO attack
         adv_example, iterations, final_confidence = pso_attack.attack(original_audio, current_label)
 
         # Determine success or failure
         success = adv_example is not None
         if success:
-            # Check the final prediction of the adversarial example
-            adv_audio_tensor = torch.tensor(adv_example, dtype=torch.float32).to(device).unsqueeze(0).unsqueeze(0)
+            # Determine final class prediction of adversarial example
+            adv_audio_tensor = extract_mel_spectrogram(adv_example, device=device)
             with torch.no_grad():
                 final_outputs = model(adv_audio_tensor)
                 final_prediction = final_outputs.argmax(dim=1).item()
             final_class = final_prediction
-        else:
-            final_class = current_label
+            success_status = "Success" if final_class != current_label else "Failure"
 
-        # Determine if the attack was successful
-        attack_success = success and (final_class != current_label)
-
-        # Compute SNR (Signal-to-Noise Ratio)
-        if attack_success:
+            # Compute SNR
             noise = adv_example - original_audio
             snr = calculate_snr(original_audio, noise)
-            snr_values.append(snr)
         else:
+            success_status = "Failure"
+            final_class = current_label
             snr = float('inf')  # Infinite SNR if no perturbation is made
 
-        # Store metrics, including the file path
+        # Store metrics
+        queries = iterations * pso_attack.swarm_size
         attack_metrics.append([
-            "Success" if attack_success else "Failure",
+            success_status,
             file_path,
             starting_confidence,
             final_confidence,
             iterations,
             snr,
-            toUrbanClass(starting_class),
+            toUrbanClass(current_label),
             toUrbanClass(final_class),
-            iterations * pso_attack.swarm_size  # Queries = iterations * swarm size
+            queries
         ])
 
-
-        # Save adversarial and original samples if specified
-        if num_saved < config['save_sample']:
+        # Save adversarial and original samples if success and below the save limit
+        if success and num_saved < config['save_sample']:
             adv_save_path = os.path.join(save_folder, f"adv_{num_saved}_{toUrbanClass(final_class)}.wav")
-            orig_save_path = os.path.join(save_folder, f"orig_{num_saved}_{toUrbanClass(starting_class)}.wav")
-            sf.write(orig_save_path, original_audio.flatten(), samplerate=22050)
-            if attack_success:
-                sf.write(adv_save_path, adv_example.flatten(), samplerate=22050)
-                num_saved += 1
+            orig_save_path = os.path.join(save_folder, f"orig_{num_saved}_{toUrbanClass(current_label)}.wav")
+            sf.write(orig_save_path, original_audio, samplerate=22050)
+            sf.write(adv_save_path, adv_example, samplerate=22050)
+            num_saved += 1
 
-    # Write attack metrics to CSV
-    csv_file = f"50_results_{config['epsilon']}.csv"
+    # Save metrics to CSV
+    csv_file = f"50_results_{epsilon}.csv"
     with open(csv_file, mode='w', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow(["Success/Failure", "File Path", "Starting Confidence", "Final Confidence",
-                         "Iterations", "SNR", "Starting Class", "Final Class", "Queries"])
+        writer.writerow([
+            "Success/Failure",
+            "File Path",
+            "Starting Confidence",
+            "Final Confidence",
+            "Iterations",
+            "SNR",
+            "Starting Class",
+            "Final Class",
+            "Queries"
+        ])
         writer.writerows(attack_metrics)
 
     logging.info(f"Attack metrics saved to {csv_file}.")
-
+    
+    # Calculate statistics
     total_attacks = len(attack_metrics)
-    successful_attacks = sum(1 for m in attack_metrics if m[0] == "Success")
-    avg_snr = np.mean(snr_values) if snr_values else float('nan')
-    snr_std_dev = np.std(snr_values) if snr_values else float('nan')
-    avg_iterations = np.mean([m[4] for m in attack_metrics if m[0] == "Success"])
-
+    successful_attacks = sum(1 for metric in attack_metrics if metric[0] == "Success")
     success_rate = (successful_attacks / total_attacks) * 100 if total_attacks > 0 else 0
 
-    logging.info(f"Total Attacks: {total_attacks}")
-    logging.info(f"Successful Attacks: {successful_attacks}")
-    logging.info(f"Success Rate: {success_rate:.2f}%")
-    logging.info(f"Average SNR of Successful Attacks: {avg_snr:.4f} dB (± {snr_std_dev:.4f})")
+    # Average iterations for successful attacks
+    successful_iterations = [metric[4] for metric in attack_metrics if metric[0] == "Success"]
+    avg_iterations = np.mean(successful_iterations) if successful_iterations else 0
+
+    # Average SNR for successful attacks
+    successful_snrs = [metric[5] for metric in attack_metrics if metric[0] == "Success" and metric[5] != float('inf')]
+    avg_snr = np.mean(successful_snrs) if successful_snrs else float('nan')
+    snr_std_dev = np.std(successful_snrs) if successful_snrs else float('nan')
+
+    # Print statistics
+    logging.info(f"Success Rate: {success_rate:.2f}% out of {total_attacks} attacks")
     logging.info(f"Average Iterations of Successful Attacks: {avg_iterations:.2f}")
+    logging.info(f"Average SNR of Successful Attacks: {avg_snr:.4f} dB (± {snr_std_dev:.4f})")
+
+    return results
+
 
 def evaluate_with_predictions(model, data_loader, criterion, device):
     model.eval()
     running_loss = 0.0
     correct = 0
     total = 0
-    y_true = []
-    y_pred = []
 
     with torch.no_grad():
-        for data, labels in data_loader:
-            data, labels = data.to(device), labels.to(device)
+        for waveforms, labels in data_loader:
+            spectrograms = torch.stack([extract_mel_spectrogram(waveform.numpy()) for waveform in waveforms])
+            spectrograms, labels = spectrograms.to(device), labels.to(device)
 
-            if data.dim() == 3:
-                data = data.unsqueeze(1)
-
-            outputs = model(data)
+            outputs = model(spectrograms)
             loss = criterion(outputs, labels)
 
-            running_loss += loss.item() * data.size(0)
+            running_loss += loss.item() * labels.size(0)
             _, predicted = outputs.max(1)
             correct += predicted.eq(labels).sum().item()
             total += labels.size(0)
 
-            y_true.extend(labels.cpu().numpy())
-            y_pred.extend(predicted.cpu().numpy())
-
     loss = running_loss / total
     accuracy = correct / total
-    return loss, accuracy, y_true, y_pred
+    return loss, accuracy

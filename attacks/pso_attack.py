@@ -2,6 +2,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import random
+from utils.utils import extract_mel_spectrogram
+
 
 class PSOAttack:
     def __init__(self, model, max_iter=20, swarm_size=10, epsilon=0.3, c1=0.7, c2=0.7, w_max=0.9, w_min=0.1, device='cuda'):
@@ -14,7 +16,6 @@ class PSOAttack:
         self.w_max = w_max
         self.w_min = w_min
         self.device = device
-        self.counter = 0
 
     def fitness_score(self, audio, original_label):
         """
@@ -23,8 +24,11 @@ class PSOAttack:
         """
         self.model.eval()
         with torch.no_grad():
-            audio_tensor = torch.tensor(audio, dtype=torch.float32).to(self.device).unsqueeze(0).unsqueeze(0)
-            outputs = self.model(audio_tensor)
+            # Convert waveform to mel-spectrogram
+            mel_tensor = extract_mel_spectrogram(audio, device=self.device)
+
+            # Pass the mel-spectrogram to the model
+            outputs = self.model(mel_tensor)
             logits = F.softmax(outputs, dim=1)
 
             # Confidence for the original class
@@ -35,7 +39,7 @@ class PSOAttack:
 
             # Fitness score: penalize high confidence in the original class
             return other_confidence - original_confidence
-        
+
     def fitness_score_targeted(self, audio, target_class):
         """
         Compute the fitness score for a targeted attack.
@@ -43,8 +47,11 @@ class PSOAttack:
         """
         self.model.eval()
         with torch.no_grad():
-            audio_tensor = torch.tensor(audio, dtype=torch.float32).to(self.device).unsqueeze(0).unsqueeze(0)
-            outputs = self.model(audio_tensor)
+            # Convert waveform to mel-spectrogram
+            mel_tensor = extract_mel_spectrogram(audio, device=self.device)
+
+            # Pass the mel-spectrogram to the model
+            outputs = self.model(mel_tensor)
             logits = F.softmax(outputs, dim=1)
 
             # Confidence for the target class
@@ -56,17 +63,6 @@ class PSOAttack:
             # Fitness score: maximize confidence in the target class
             return target_confidence - other_confidence
 
-    # def initialize_particles(self, original_audio):
-    #     particles = []
-    #     velocities = []
-    #     for _ in range(self.swarm_size):
-    #         noise = np.random.uniform(-self.epsilon, self.epsilon, size=original_audio.shape)
-    #         particle = np.clip(original_audio + noise, -1.0, 1.0)
-    #         velocity = np.zeros_like(original_audio)
-    #         particles.append(particle)
-    #         velocities.append(velocity)
-    #     return np.array(particles), np.array(velocities)
-    
     def initialize_particles(self, original_audio):
         particles = []
         velocities = []
@@ -76,9 +72,11 @@ class PSOAttack:
             velocity = np.zeros_like(original_audio)
             particles.append(particle)
             velocities.append(velocity)
-            
-        return np.array(particles), np.array(velocities)
+            # clipped_noise = np.clip(original_audio + noise, -1.0, 1.0) - original_audio
+            # effective_noise_power = np.mean(clipped_noise**2)
+            # print(f"Effective Noise Power after Clipping: {effective_noise_power}, Original Noise Power: {np.mean(noise**2)}")
 
+        return np.array(particles), np.array(velocities)
 
     def update_velocity(self, velocity, particle, personal_best, global_best, w, c1, c2):
         r1, r2 = random.random(), random.random()
@@ -89,10 +87,6 @@ class PSOAttack:
 
     def clip_audio(self, audio, original_audio, epsilon):
         return np.clip(audio, original_audio - epsilon, original_audio + epsilon)
-
-    def mutate_particle(self, particle):
-        mutation = np.random.uniform(-self.mutation_rate, self.mutation_rate, size=particle.shape)
-        return np.clip(particle + mutation, -1.0, 1.0)
 
     def attack(self, original_audio, original_label, target_class=None):
         """
