@@ -10,4 +10,4 @@ c1 : 0.7
 c2 : 0.7
 w_max : 0.9
 w_min : 0.1
-save_sample: 10 #Number of pairs (original-advarsarial) to save
+save_sample: 10 # Number of pairs (original-advarsarial) to save (hardcoded dir: data/)
