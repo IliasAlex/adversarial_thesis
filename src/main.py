@@ -13,7 +13,8 @@ from attacks.pso_attack import PSOAttack
 from evaluate_pso_attack import evaluate_attack_on_folds
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Sound classification with cross-validation')
+    parser = argparse.ArgumentParser(description='Adversarial attack thesis on sound event detection model')
+    parser.add_argument('-m', '--mode', type=str, help='Current mode types: train/attack')
     parser.add_argument('-c', '--config', type=str, default='config.yaml', help='Path to the configuration file')
     args = parser.parse_args()
     return args
@@ -36,7 +37,7 @@ def cross_validate(config):
 
         data_csv = f"{config['data_dir']}/UrbanSound8K.csv"
         train_loader, val_loader, test_loader = get_data_loaders(
-            data_csv, config['data_dir'], train_folds, [val_fold], [test_fold], batch_size=config['batch_size']
+            data_csv, config['data_dir'], train_folds, [val_fold], [test_fold], batch_size=config['batch_size'], mode='train'
         )
 
         # Initialize model, criterion, and optimizer
@@ -97,7 +98,7 @@ def evaluate_with_predictions(model, data_loader, criterion, device):
 def main():
     args = parse_args()
     config = load_config(args.config)
-    mode = config['mode']
+    mode = args.mode
     set_seed(config['manualSeed'])
     
     if mode == "train":
