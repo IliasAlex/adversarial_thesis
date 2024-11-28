@@ -214,7 +214,7 @@ def evaluate_attack_on_folds(config):
             num_saved += 1
 
     # Save metrics to CSV
-    csv_file = f"50_results_{epsilon}.csv"
+    csv_file = f"/home/ilias/projects/adversarial_thesis/results/50_results_{epsilon}.csv"
     with open(csv_file, mode='w', newline='') as file:
         writer = csv.writer(file)
         writer.writerow([
