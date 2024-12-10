@@ -148,6 +148,7 @@ def evaluate_attack_on_folds(config):
         c2=config['c2'],
         w_max=config['w_max'],
         w_min=config['w_min'],
+        l2_weight= config['l2_weight'],
         device=device
     )
 
@@ -167,7 +168,7 @@ def evaluate_attack_on_folds(config):
         file_path = selected_file_paths[i]
 
         # Starting confidence and class
-        starting_confidence = pso_attack.fitness_score(original_audio, current_label)
+        starting_confidence = pso_attack.fitness_score(original_audio, original_audio, current_label)
 
         # Perform PSO attack
         adv_example, iterations, final_confidence = pso_attack.attack(original_audio, current_label)
