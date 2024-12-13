@@ -67,14 +67,14 @@ class PSOAttack:
         particles = []
         velocities = []
         for _ in range(self.swarm_size):
-            noise = np.random.uniform(-1, 1, size=original_audio.shape) * self.epsilon
+            noise = np.random.uniform(
+                -np.abs(original_audio),  
+                np.abs(original_audio)   
+            ) * self.epsilon  
             particle = np.clip(original_audio + noise, -1.0, 1.0)
             velocity = np.zeros_like(original_audio)
             particles.append(particle)
             velocities.append(velocity)
-            # clipped_noise = np.clip(original_audio + noise, -1.0, 1.0) - original_audio
-            # effective_noise_power = np.mean(clipped_noise**2)
-            # print(f"Effective Noise Power after Clipping: {effective_noise_power}, Original Noise Power: {np.mean(noise**2)}")
 
         return np.array(particles), np.array(velocities)
 
