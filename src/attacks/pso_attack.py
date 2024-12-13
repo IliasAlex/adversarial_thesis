@@ -50,9 +50,14 @@ class PSOAttack:
 
             # Compute L2 norm penalty (distance between adversarial and original audio)
             l2_penalty = np.linalg.norm(audio - original_audio)
+            
+            # Compute Q1 regularization term
+            perturbation = audio - original_audio # compute perturbation
+            epsilon = 1e-6  # Small constant to prevent division by zero
+            q1_regularization = np.sum(perturbation / (np.abs(original_audio) + epsilon))
 
             # Combine the classification fitness with the L2 penalty
-            fitness = other_confidence - original_confidence - self.l2_weight * l2_penalty
+            fitness = other_confidence - original_confidence - q1_regularization
 
             return fitness
 
@@ -133,7 +138,8 @@ class PSOAttack:
                 # Update velocity and position of each particle
                 velocities[i] = self.update_velocity(velocities[i], particles[i], personal_best[i], global_best, w, self.c1, self.c2)
                 particles[i] = self.clip_audio(particles[i] + velocities[i], original_audio, self.epsilon)
-
+                # anti gia clipping z /= np.abs(z).max()
+                
                 # Evaluate fitness based on attack type
                 if target_class is None:
                     score = self.fitness_score(audio=particles[i], original_audio=original_audio, original_label= original_label)

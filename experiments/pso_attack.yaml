@@ -12,6 +12,6 @@ c1 : 0.7
 c2 : 0.7
 w_max : 0.9
 w_min : 0.1
-l2_weight: 0.1
+l2_weight: 0.3
 save_sample: 10 # Number of pairs (original-advarsarial) to save 
 save_folder: "/home/ilias/projects/adversarial_thesis/data"
