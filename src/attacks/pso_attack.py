@@ -54,10 +54,11 @@ class PSOAttack:
             # Compute Q1 regularization term
             perturbation = audio - original_audio # compute perturbation
             epsilon = 1e-6  # Small constant to prevent division by zero
-            q1_regularization = np.sum(perturbation / (np.abs(original_audio) + epsilon))
+            q1_regularization = np.mean(np.abs(perturbation) / (np.abs(original_audio) + epsilon))
+
 
             # Combine the classification fitness with the L2 penalty
-            fitness = other_confidence - original_confidence - q1_regularization
+            fitness = other_confidence - original_confidence - q1_regularization * self.l2_weight
 
             return fitness
 

@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from models.audioclip import AudioCLIP
 
 class BaselineCNN(nn.Module):
     '''
@@ -49,3 +50,38 @@ class BaselineCNN(nn.Module):
         x = self.fc2(x)
         
         return x
+
+# AudioCLIP Model with Classification Head
+class AudioCLIPWithHead(nn.Module):
+    def __init__(self, pretrained, num_classes=10, device=None):
+        super(AudioCLIPWithHead, self).__init__()
+        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.audioclip = AudioCLIP(pretrained=pretrained, multilabel=False)
+
+        # Freeze all parameters except audio-related ones
+        for p in self.audioclip.parameters():
+            p.requires_grad = False
+        for p in self.audioclip.audio.parameters():
+            p.requires_grad = True
+
+        #self.classification_head = nn.Linear(1024, num_classes)
+        self.classification_head = nn.Sequential(
+            nn.Linear(1024, 256),  # First hidden layer
+            nn.ReLU(),             # Non-linearity
+            nn.Dropout(0.5),       # Dropout for regularization
+            nn.Linear(256, num_classes)  # Output layer
+        )
+
+
+    def forward(self, audio):
+        # Extract audio features
+        audio_features = self.audioclip.encode_audio(audio=audio)
+        # Get audio features
+        # ((audio_features, _, _), _), _ = self.audioclip(
+        #     audio=audio,
+        #     batch_indices=torch.arange(audio.shape[0], dtype=torch.int64, device=device)
+        # )
+        # audio_features = audio_features / audio_features.norm(dim=-1, keepdim=True)  # Normalize
+        # Pass through classification head
+        output = self.classification_head(audio_features)
+        return output

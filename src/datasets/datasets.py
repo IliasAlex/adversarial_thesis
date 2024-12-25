@@ -23,8 +23,11 @@ class UrbanSound8KDataset(Dataset):
         self.transform = transform
         self.folds = folds
         self.mode = mode  # Mode: 'train' or 'attack'
-        self.target_length = 4 * 22050  # 4 seconds at 22050 Hz
-        
+        if self.mode == 'AudioCLIP':
+            self.sr = 16000
+        else:
+            self.sr = 22050
+        self.target_length = 4 * self.sr  # 4 seconds at 22050 Hz
         # Filter annotations to include only the specified folds
         self.annotations = self.annotations[self.annotations['fold'].isin(self.folds)]
 
@@ -47,7 +50,7 @@ class UrbanSound8KDataset(Dataset):
         audio_file_path = os.path.join(self.root_dir, f"fold{fold}", file_name)
         
         # Load the audio file
-        audio, sample_rate = librosa.load(audio_file_path, sr=22050)
+        audio, sample_rate = librosa.load(audio_file_path, sr=self.sr)
         
         # Ensure all audio has the same length (4 seconds)
         if len(audio) < self.target_length:
@@ -61,11 +64,16 @@ class UrbanSound8KDataset(Dataset):
         label = torch.tensor(label, dtype=torch.long)
 
         # Depending on the mode, return the appropriate features
-        if self.mode == 'train':
+        if self.mode == 'train' or self.mode == "evaluate":
             features = extract_mel_spectrogram(audio, sample_rate)
             if self.transform:
                 features = self.transform(features)
         elif self.mode == 'attack':
+            features = audio
+        elif self.mode == 'AudioCLIP':
+            # Normalize waveform between -1 and 1
+            audio = audio / np.max(np.abs(audio))
+            audio = torch.tensor(audio, dtype=torch.float32)
             features = audio
         return features, label, audio_file_path
 
