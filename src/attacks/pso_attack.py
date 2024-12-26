@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import random
-from utils.utils import extract_mel_spectrogram
+from utils.utils import extract_mel_spectrogram, calculate_snr
 
 
 class PSOAttack:
@@ -18,7 +18,40 @@ class PSOAttack:
         self.w_min = w_min
         self.device = device
         self.l2_weight = l2_weight
+        self.target_snr = 17
 
+    def normalize_noise_to_snr(self, original_audio, noise, target_snr):
+        """
+        Normalize noise to achieve a specific SNR.
+
+        Args:
+            original_audio (numpy.ndarray): The original audio waveform.
+            noise (numpy.ndarray): The noise to be normalized.
+            target_snr (float): The target SNR in dB.
+
+        Returns:
+            numpy.ndarray: The scaled noise achieving the desired SNR.
+        """
+        # Calculate signal power
+        signal_power = np.mean(original_audio ** 2)
+
+        # Calculate current noise power
+        noise_power = np.mean(noise ** 2)
+
+        # Prevent division by zero
+        if noise_power == 0:
+            return noise
+
+        # Calculate desired noise power for target SNR
+        noise_power_desired = signal_power / (10 ** (target_snr / 10))
+
+        # Scale the noise
+        scaling_factor = np.sqrt(noise_power_desired / noise_power)
+        noise_scaled = noise * scaling_factor
+        
+        return noise_scaled
+
+    
     def fitness_score(self, audio, original_audio, original_label):
         """
         Compute the fitness score for a non-targeted attack with L2 norm penalty.
@@ -36,6 +69,14 @@ class PSOAttack:
         """
         self.model.eval()
         with torch.no_grad():
+            # If target SNR is set, normalize perturbation
+            if self.target_snr is not None:
+                perturbation = audio - original_audio
+                noise = self.normalize_noise_to_snr(original_audio, perturbation, self.target_snr)
+                audio = original_audio + noise  # Compute new audio with fixed SNR
+            
+            print(f"SNR={calculate_snr(audio, noise)}")
+                
             if self.model_name == "Baseline":
                 # Convert waveform to mel-spectrogram
                 features = extract_mel_spectrogram(audio, device=self.device)
@@ -52,7 +93,7 @@ class PSOAttack:
 
             # Maximum confidence for any class other than the original class
             other_confidence = logits[0].max().item() if logits[0].argmax() != original_label else logits[0].topk(2).values[1].item()
-
+                        
             # Compute L2 norm penalty (distance between adversarial and original audio)
             l2_penalty = np.linalg.norm(audio - original_audio)
             
