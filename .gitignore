@@ -166,3 +166,8 @@ data/*
 *.csv
 
 results/*
+
+*.pt
+*.pth
+
+*.gz

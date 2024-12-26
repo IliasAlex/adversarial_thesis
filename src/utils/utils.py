@@ -19,9 +19,9 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def setup_logging():
+def setup_logging(filename='training.log'):
     logging.basicConfig(
-        filename='training.log',
+        filename=filename,
         filemode='w',
         format='%(asctime)s - %(levelname)s - %(message)s',
         level=logging.INFO
@@ -31,6 +31,10 @@ def setup_logging():
 def toUrbanClass(id):
     classes = ["air_conditioner", "car_horn", "children_playing", "dog_bark", "drilling", "engine_idling", "gun_shot", "jackhammer", "siren", "street_music"]
     return classes[id]
+
+                # dog_bark, children_playing, air_conditioner, street_music, gun_shot, siren, engine_idling, jackhammer, drilling, car_horn
+
+
 
 
 def extract_mel_spectrogram(audio, sample_rate=22010, device='cuda'):

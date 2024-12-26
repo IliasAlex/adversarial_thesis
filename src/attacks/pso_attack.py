@@ -6,8 +6,9 @@ from utils.utils import extract_mel_spectrogram
 
 
 class PSOAttack:
-    def __init__(self, model, max_iter=20, swarm_size=10, epsilon=0.3, c1=0.7, c2=0.7, w_max=0.9, w_min=0.1, device='cuda'):
+    def __init__(self, model, model_name, max_iter=20, swarm_size=10, epsilon=0.3, c1=0.7, c2=0.7, w_max=0.9, w_min=0.1, l2_weight=0, device='cuda'):
         self.model = model.to(device)
+        self.model_name = model_name
         self.max_iter = max_iter
         self.swarm_size = swarm_size
         self.epsilon = epsilon
@@ -16,19 +17,34 @@ class PSOAttack:
         self.w_max = w_max
         self.w_min = w_min
         self.device = device
+        self.l2_weight = l2_weight
 
-    def fitness_score(self, audio, original_label):
+    def fitness_score(self, audio, original_audio, original_label):
         """
-        Compute the fitness score for a non-targeted attack.
-        The score is higher when the model predicts any class other than the original label.
+        Compute the fitness score for a non-targeted attack with L2 norm penalty.
+        The score is higher when the model predicts any class other than the original label,
+        and penalized by the L2 norm of the perturbation.
+
+        Args:
+            audio (numpy.ndarray): The adversarial audio waveform.
+            original_audio (numpy.ndarray): The original audio waveform.
+            original_label (int): The true label of the original audio.
+            l2_weight (float): The weight applied to the L2 norm penalty.
+
+        Returns:
+            float: The computed fitness score.
         """
         self.model.eval()
         with torch.no_grad():
-            # Convert waveform to mel-spectrogram
-            mel_tensor = extract_mel_spectrogram(audio, device=self.device)
+            if self.model_name == "Baseline":
+                # Convert waveform to mel-spectrogram
+                features = extract_mel_spectrogram(audio, device=self.device)
+            elif self.model_name == "AudioCLIP":
+                features = audio / np.max(np.abs(audio))
+                features = torch.tensor(features, dtype=torch.float32).unsqueeze(0).to(self.device)
 
             # Pass the mel-spectrogram to the model
-            outputs = self.model(mel_tensor)
+            outputs = self.model(features)
             logits = F.softmax(outputs, dim=1)
 
             # Confidence for the original class
@@ -37,8 +53,20 @@ class PSOAttack:
             # Maximum confidence for any class other than the original class
             other_confidence = logits[0].max().item() if logits[0].argmax() != original_label else logits[0].topk(2).values[1].item()
 
-            # Fitness score: penalize high confidence in the original class
-            return other_confidence - original_confidence
+            # Compute L2 norm penalty (distance between adversarial and original audio)
+            l2_penalty = np.linalg.norm(audio - original_audio)
+            
+            # Compute Q1 regularization term
+            perturbation = audio - original_audio # compute perturbation
+            epsilon = 1e-6  # Small constant to prevent division by zero
+            q1_regularization = np.mean(np.abs(perturbation) / (np.abs(original_audio) + epsilon))
+
+
+            # Combine the classification fitness with the L2 penalty
+            fitness = other_confidence - original_confidence #- q1_regularization * self.l2_weight
+
+            return fitness
+
 
     def fitness_score_targeted(self, audio, target_class):
         """
@@ -100,8 +128,8 @@ class PSOAttack:
 
         # Determine the initial global best based on the type of attack
         if target_class is None:
-            global_best = np.copy(particles[np.argmax([self.fitness_score(p, original_label) for p in particles])])
-            personal_best_scores = [self.fitness_score(p, original_label) for p in particles]
+            global_best = np.copy(particles[np.argmax([self.fitness_score(p, p, original_label) for p in particles])])
+            personal_best_scores = [self.fitness_score(p, p, original_label) for p in particles]
             global_best_score = max(personal_best_scores)
         else:
             global_best = np.copy(particles[np.argmax([self.fitness_score_targeted(p, target_class) for p in particles])])
@@ -116,10 +144,11 @@ class PSOAttack:
                 # Update velocity and position of each particle
                 velocities[i] = self.update_velocity(velocities[i], particles[i], personal_best[i], global_best, w, self.c1, self.c2)
                 particles[i] = self.clip_audio(particles[i] + velocities[i], original_audio, self.epsilon)
-
+                # anti gia clipping z /= np.abs(z).max()
+                
                 # Evaluate fitness based on attack type
                 if target_class is None:
-                    score = self.fitness_score(particles[i], original_label)
+                    score = self.fitness_score(audio=particles[i], original_audio=original_audio, original_label= original_label)
                 else:
                     score = self.fitness_score_targeted(particles[i], target_class)
 
