@@ -4,21 +4,21 @@ num_classes: 10
 manualSeed: 3
 batch_size: 32
 
-# model_name: Baseline
-# model_path: '/home/ilias/projects/adversarial_thesis/src/models/baseline_cnn.pth'
+model_name: Baseline
+model_path: '/home/ilias/projects/adversarial_thesis/src/models/baseline_cnn.pth'
 
-model_name: AudioCLIP
-model_path: '/home/ilias/projects/adversarial_thesis/src/models/AudioCLIP-finetuned-MLP-0.87.pth'
-pretrained_audioclip: '/home/ilias/projects/adversarial_thesis/src/assets/AudioCLIP-pretrained.pt'
+# model_name: AudioCLIP
+# model_path: '/home/ilias/projects/adversarial_thesis/src/models/AudioCLIP-finetuned-MLP-0.87.pth'
+# pretrained_audioclip: '/home/ilias/projects/adversarial_thesis/src/assets/AudioCLIP-pretrained.pt'
 
 # PSO attack parameters
 max_iter : 20  
 swarm_size : 10  
 epsilon : 0.3
-c1 : 0.7
-c2 : 0.7
+c1 : 1.7
+c2 : 0.3
 w_max : 0.9
 w_min : 0.1
-l2_weight: 0.9
-save_sample: 10 # Number of pairs (original-advarsarial) to save 
+l2_weight: 0.6
+save_sample: 0 # Number of pairs (original-advarsarial) to save 
 save_folder: "/home/ilias/projects/adversarial_thesis/data"

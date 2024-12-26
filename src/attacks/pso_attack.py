@@ -40,8 +40,8 @@ class PSOAttack:
                 # Convert waveform to mel-spectrogram
                 features = extract_mel_spectrogram(audio, device=self.device)
             elif self.model_name == "AudioCLIP":
-                audio = audio / np.max(np.abs(audio))
-                features = torch.tensor(audio, dtype=torch.float32).unsqueeze(0).to(self.device)
+                features = audio / np.max(np.abs(audio))
+                features = torch.tensor(features, dtype=torch.float32).unsqueeze(0).to(self.device)
 
             # Pass the mel-spectrogram to the model
             outputs = self.model(features)
@@ -63,7 +63,7 @@ class PSOAttack:
 
 
             # Combine the classification fitness with the L2 penalty
-            fitness = other_confidence - original_confidence - q1_regularization * self.l2_weight
+            fitness = other_confidence - original_confidence #- q1_regularization * self.l2_weight
 
             return fitness
 
