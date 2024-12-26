@@ -6,8 +6,9 @@ from utils.utils import extract_mel_spectrogram
 
 
 class PSOAttack:
-    def __init__(self, model, max_iter=20, swarm_size=10, epsilon=0.3, c1=0.7, c2=0.7, w_max=0.9, w_min=0.1, l2_weight=0, device='cuda'):
+    def __init__(self, model, model_name, max_iter=20, swarm_size=10, epsilon=0.3, c1=0.7, c2=0.7, w_max=0.9, w_min=0.1, l2_weight=0, device='cuda'):
         self.model = model.to(device)
+        self.model_name = model_name
         self.max_iter = max_iter
         self.swarm_size = swarm_size
         self.epsilon = epsilon
@@ -35,11 +36,15 @@ class PSOAttack:
         """
         self.model.eval()
         with torch.no_grad():
-            # Convert waveform to mel-spectrogram
-            mel_tensor = extract_mel_spectrogram(audio, device=self.device)
+            if self.model_name == "Baseline":
+                # Convert waveform to mel-spectrogram
+                features = extract_mel_spectrogram(audio, device=self.device)
+            elif self.model_name == "AudioCLIP":
+                audio = audio / np.max(np.abs(audio))
+                features = torch.tensor(audio, dtype=torch.float32).unsqueeze(0).to(self.device)
 
             # Pass the mel-spectrogram to the model
-            outputs = self.model(mel_tensor)
+            outputs = self.model(features)
             logits = F.softmax(outputs, dim=1)
 
             # Confidence for the original class

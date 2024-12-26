@@ -7,7 +7,7 @@ import csv
 from torch.utils.data import DataLoader, TensorDataset
 import random
 from datasets.datasets import get_data_loaders
-from models.models import BaselineCNN
+from models.models import BaselineCNN, AudioCLIPWithHead
 from loops.trainer import train
 from attacks.pso_attack import PSOAttack
 from utils.utils import toUrbanClass, calculate_snr, extract_mel_spectrogram
@@ -26,7 +26,10 @@ def setup_logging():
 
 
 def load_model(config, device):
-    model = BaselineCNN(num_classes=config['num_classes']).to(device)
+    if config['model_name'] == 'Baseline':
+        model = BaselineCNN(num_classes=10)
+    elif config['model_name'] == 'AudioCLIP':
+        model = AudioCLIPWithHead(pretrained=config['pretrained_audioclip'], num_classes=10, device=device)
 
     if config['model_path'] is not None:
         logging.info(f"Loading pre-trained model from {config['model_path']}")
@@ -36,7 +39,7 @@ def load_model(config, device):
     return model
 
 
-def create_balanced_subset(test_loader, model, device, sample_size=50):
+def create_balanced_subset(test_loader, model_name, model, device, sample_size=50):
     """
     Create a balanced subset with correctly classified samples and include file paths.
     This version expects waveform inputs and transforms them to mel-spectrograms before feeding to the model.
@@ -45,14 +48,20 @@ def create_balanced_subset(test_loader, model, device, sample_size=50):
     selected_data = []
     selected_labels = []
     selected_file_paths = []
-    correct_indices_per_class = {label: [] for label in range(model.fc2.out_features)}
+    if model_name == "Baseline":
+        correct_indices_per_class = {label: [] for label in range(model.fc2.out_features)}
+    elif model_name == "AudioCLIP":
+        correct_indices_per_class = {label: [] for label in range(model.classification_head[-1].out_features)}
 
     with torch.no_grad():
         for waveforms, labels, file_paths in test_loader:
             batch_spectrograms = torch.stack([extract_mel_spectrogram(waveform.numpy()) for waveform in waveforms])
 
-            # Forward pass through the model
-            outputs = model(batch_spectrograms.to(device))
+            if model_name == "Baseline":
+                outputs = model(batch_spectrograms.to(device))
+            elif model_name == "AudioCLIP":        
+                outputs = model(waveforms.to(device))
+
             _, predicted = outputs.max(1)
 
             # Store only correctly classified samples
@@ -99,6 +108,7 @@ def evaluate_attack_on_folds(config):
 
     # Load or train the model
     model = load_model(config, device)
+    model.to(device)
 
     # Experiment with different epsilon values
     epsilon = config["epsilon"]
@@ -107,7 +117,7 @@ def evaluate_attack_on_folds(config):
     logging.info(f"Experimenting with epsilon = {epsilon}")
 
     # Create a balanced subset for testing
-    balanced_test_loader, file_paths = create_balanced_subset(test_loader, model, device, sample_size=50)
+    balanced_test_loader, file_paths = create_balanced_subset(test_loader, config['model_name'],model, device, sample_size=50)
 
     # Use 50 random examples from the balanced test loader
     all_data = []
@@ -135,12 +145,13 @@ def evaluate_attack_on_folds(config):
         batch_size=config['batch_size'],
         shuffle=False
     )
-    test_loss, test_acc = evaluate_with_predictions(model, selected_loader, nn.CrossEntropyLoss(), device)
+    test_loss, test_acc = evaluate_with_predictions(config['model_name'], model, selected_loader, nn.CrossEntropyLoss(), device)
     logging.info(f"Selected Test Accuracy: {test_acc:.4f}")
 
     # Initialize PSO attack
     pso_attack = PSOAttack(
         model=model,
+        model_name = config['model_name'],
         max_iter=config['max_iter'],
         swarm_size=config['swarm_size'],
         epsilon=epsilon,  # Set epsilon value for this experiment
@@ -255,7 +266,7 @@ def evaluate_attack_on_folds(config):
     return results
 
 
-def evaluate_with_predictions(model, data_loader, criterion, device):
+def evaluate_with_predictions(model_name, model, data_loader, criterion, device):
     model.eval()
     running_loss = 0.0
     correct = 0
@@ -265,8 +276,14 @@ def evaluate_with_predictions(model, data_loader, criterion, device):
         for waveforms, labels in data_loader:
             spectrograms = torch.stack([extract_mel_spectrogram(waveform.numpy()) for waveform in waveforms])
             spectrograms, labels = spectrograms.to(device), labels.to(device)
+            waveforms.to(device)
+            if model_name == 'Baseline':
+                outputs = model(spectrograms)
+            elif model_name == "AudioCLIP":
+                outputs = model(waveforms)
+            else:
+                raise "Incorrect model name"                
 
-            outputs = model(spectrograms)
             loss = criterion(outputs, labels)
 
             running_loss += loss.item() * labels.size(0)

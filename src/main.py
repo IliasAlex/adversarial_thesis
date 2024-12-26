@@ -73,7 +73,7 @@ def cross_validate(config):
         for i, report in enumerate(all_reports):
             f.write(f"Fold {i + 1} Classification Report:\n{report}\n\n")
 
-def evaluate_with_predictions(model, data_loader, device, model_name='Baseline'):
+def evaluate_with_predictions(model, data_loader, device):
     model.eval()
     correct = 0
     total = 0
@@ -84,22 +84,13 @@ def evaluate_with_predictions(model, data_loader, device, model_name='Baseline')
         for data, labels, _ in tqdm(data_loader, desc="Evaluating"):
             data, labels = data.to(device), labels.to(device)
             
-            if model_name == "AudioCLIP":
-                outputs = model(audio=data)
-                _, predicted = torch.max(outputs, 1)
-                total += labels.size(0)
-                correct += (predicted == labels).sum().item()
+            outputs = model(data)
+            _, predicted = outputs.max(1)
+            correct += predicted.eq(labels).sum().item()
+            total += labels.size(0)
 
-                y_true.extend(labels.cpu().numpy())
-                y_pred.extend(predicted.cpu().numpy())
-            elif model_name == "Baseline":
-                outputs = model(data)
-                _, predicted = outputs.max(1)
-                correct += predicted.eq(labels).sum().item()
-                total += labels.size(0)
-
-                y_true.extend(labels.cpu().numpy())
-                y_pred.extend(predicted.cpu().numpy())
+            y_true.extend(labels.cpu().numpy())
+            y_pred.extend(predicted.cpu().numpy())
                 
     accuracy = correct / total
     return accuracy, y_true, y_pred
@@ -130,7 +121,7 @@ def evaluate_model(config):
     model.to(device)
     print(model)    
 
-    test_acc, y_true, y_pred = evaluate_with_predictions(model, test_loader, device, config['model_name'])
+    test_acc, y_true, y_pred = evaluate_with_predictions(model, test_loader, device)
 
     report = classification_report(y_true, y_pred, target_names=[str(i) for i in range(config['num_classes'])])
     logging.info(f"Evaluation Classification Report:\n{report}")

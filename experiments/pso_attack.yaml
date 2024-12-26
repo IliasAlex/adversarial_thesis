@@ -3,7 +3,14 @@ data_dir: "/data/urbansound8k"
 num_classes: 10
 manualSeed: 3
 batch_size: 32
-model_path: "/home/ilias/projects/adversarial_thesis/src/models/baseline_cnn.pth"
+
+# model_name: Baseline
+# model_path: '/home/ilias/projects/adversarial_thesis/src/models/baseline_cnn.pth'
+
+model_name: AudioCLIP
+model_path: '/home/ilias/projects/adversarial_thesis/src/models/AudioCLIP-finetuned-MLP-0.87.pth'
+pretrained_audioclip: '/home/ilias/projects/adversarial_thesis/src/assets/AudioCLIP-pretrained.pt'
+
 # PSO attack parameters
 max_iter : 20  
 swarm_size : 10  

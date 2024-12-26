@@ -23,10 +23,7 @@ class UrbanSound8KDataset(Dataset):
         self.transform = transform
         self.folds = folds
         self.mode = mode  # Mode: 'train' or 'attack'
-        if self.mode == 'AudioCLIP':
-            self.sr = 16000
-        else:
-            self.sr = 22050
+        self.sr = 22050
         self.target_length = 4 * self.sr  # 4 seconds at 22050 Hz
         # Filter annotations to include only the specified folds
         self.annotations = self.annotations[self.annotations['fold'].isin(self.folds)]

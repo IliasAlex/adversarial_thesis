@@ -64,24 +64,20 @@ class AudioCLIPWithHead(nn.Module):
         for p in self.audioclip.audio.parameters():
             p.requires_grad = True
 
-        #self.classification_head = nn.Linear(1024, num_classes)
         self.classification_head = nn.Sequential(
-            nn.Linear(1024, 256),  # First hidden layer
-            nn.ReLU(),             # Non-linearity
-            nn.Dropout(0.5),       # Dropout for regularization
-            nn.Linear(256, num_classes)  # Output layer
+            nn.Linear(1024, 512),  
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(256, num_classes)
         )
 
 
     def forward(self, audio):
         # Extract audio features
         audio_features = self.audioclip.encode_audio(audio=audio)
-        # Get audio features
-        # ((audio_features, _, _), _), _ = self.audioclip(
-        #     audio=audio,
-        #     batch_indices=torch.arange(audio.shape[0], dtype=torch.int64, device=device)
-        # )
-        # audio_features = audio_features / audio_features.norm(dim=-1, keepdim=True)  # Normalize
-        # Pass through classification head
+        
         output = self.classification_head(audio_features)
         return output

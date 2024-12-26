@@ -7,5 +7,5 @@ manualSeed: 3
 batch_size: 32
 model_name: 'AudioCLIP' #'Baseline'
 #model_path: '/home/ilias/projects/adversarial_thesis/src/models/baseline_cnn.pth'
-model_path: '/home/ilias/projects/AudioCLIP/AudioCLIP-finetuned-MLP-0.86.pth'
-pretrained_audioclip: '/home/ilias/projects/AudioCLIP/assets/UrbanSound8K_Multimodal-Audio-x2_ACLIP-CV01/UrbanSound8K_Multimodal-Audio-x2_ACLIP-CV01_ACLIP-CV01_performance=0.9188.pt'
+model_path: '/home/ilias/projects/adversarial_thesis/src/models/AudioCLIP-finetuned-MLP-0.87.pth'
+pretrained_audioclip: '/home/ilias/projects/adversarial_thesis/src/assets/AudioCLIP-pretrained.pt'
