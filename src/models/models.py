@@ -81,3 +81,97 @@ class AudioCLIPWithHead(nn.Module):
         
         output = self.classification_head(audio_features)
         return output
+    
+class Autoencoder(nn.Module):
+    def __init__(self):
+        super(Autoencoder, self).__init__()
+        
+        # Encoder
+        self.encoder = nn.Sequential(
+            nn.Conv2d(1, 16, kernel_size=3, stride=2, padding=1),  # [B, 1, H, W] -> [B, 16, H/2, W/2]
+            nn.ReLU(),
+            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1), # [B, 16, H/2, W/2] -> [B, 32, H/4, W/4]
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1), # [B, 32, H/4, W/4] -> [B, 64, H/8, W/8]
+            nn.ReLU(),
+        )
+        
+        # Decoder
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1), # [B, 64, H/8, W/8] -> [B, 32, H/4, W/4]
+            nn.ReLU(),
+            nn.ConvTranspose2d(32, 16, kernel_size=3, stride=2, padding=1, output_padding=1), # [B, 32, H/4, W/4] -> [B, 16, H/2, W/2]
+            nn.ReLU(),
+            nn.ConvTranspose2d(16, 1, kernel_size=3, stride=2, padding=1, output_padding=1),  # [B, 16, H/2, W/2] -> [B, 1, H, W+1]
+        )
+
+    def forward(self, x):
+        encoded = self.encoder(x)
+        decoded = self.decoder(encoded)
+
+        # Explicit cropping to match the input size
+        if decoded.shape[-1] > x.shape[-1]:
+            decoded = decoded[:, :, :, :x.shape[-1]]
+        return decoded
+    
+class UNet(nn.Module):
+    def __init__(self):
+        super(UNet, self).__init__()
+        
+        # Encoder
+        self.enc1 = nn.Sequential(
+            nn.Conv2d(1, 16, kernel_size=3, stride=2, padding=1),  # [B, 1, H, W] -> [B, 16, H/2, W/2]
+            nn.ReLU()
+        )
+        self.enc2 = nn.Sequential(
+            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1), # [B, 16, H/2, W/2] -> [B, 32, H/4, W/4]
+            nn.ReLU()
+        )
+        self.enc3 = nn.Sequential(
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1), # [B, 32, H/4, W/4] -> [B, 64, H/8, W/8]
+            nn.ReLU()
+        )
+        
+        # Decoder
+        self.dec3 = nn.Sequential(
+            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1), # [B, 64, H/8, W/8] -> [B, 32, H/4, W/4]
+            nn.ReLU()
+        )
+        self.dec2 = nn.Sequential(
+            nn.ConvTranspose2d(64, 16, kernel_size=3, stride=2, padding=1, output_padding=1), # [B, 64, H/4, W/4] -> [B, 16, H/2, W/2]
+            nn.ReLU()
+        )
+        self.dec1 = nn.Sequential(
+            nn.ConvTranspose2d(32, 1, kernel_size=3, stride=2, padding=1, output_padding=1),  # [B, 32, H/2, W/2] -> [B, 1, H, W]
+        )
+
+    def forward(self, x):
+        # Encoder
+        enc1_out = self.enc1(x)  # [B, 16, H/2, W/2]
+        enc2_out = self.enc2(enc1_out)  # [B, 32, H/4, W/4]
+        enc3_out = self.enc3(enc2_out)  # [B, 64, H/8, W/8]
+
+        # Decoder with skip connections
+        dec3_out = self.dec3(enc3_out)  # [B, 32, H/4, W/4]
+
+        # Crop if dimensions don't match
+        if dec3_out.size(2) != enc2_out.size(2) or dec3_out.size(3) != enc2_out.size(3):
+            dec3_out = dec3_out[:, :, :enc2_out.size(2), :enc2_out.size(3)]
+
+        dec3_out = torch.cat((dec3_out, enc2_out), dim=1)  # Concatenate along channel dimension
+
+        dec2_out = self.dec2(dec3_out)  # [B, 16, H/2, W/2]
+
+        # Crop if dimensions don't match
+        if dec2_out.size(2) != enc1_out.size(2) or dec2_out.size(3) != enc1_out.size(3):
+            dec2_out = dec2_out[:, :, :enc1_out.size(2), :enc1_out.size(3)]
+
+        dec2_out = torch.cat((dec2_out, enc1_out), dim=1)  # Concatenate along channel dimension
+
+        dec1_out = self.dec1(dec2_out)  # [B, 1, H, W]
+
+        # Final cropping to match input size (if necessary)
+        if dec1_out.size(2) != x.size(2) or dec1_out.size(3) != x.size(3):
+            dec1_out = dec1_out[:, :, :x.size(2), :x.size(3)]
+
+        return dec1_out

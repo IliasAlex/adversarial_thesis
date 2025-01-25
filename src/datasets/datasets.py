@@ -72,6 +72,7 @@ class UrbanSound8KDataset(Dataset):
             audio = audio / np.max(np.abs(audio))
             audio = torch.tensor(audio, dtype=torch.float32)
             features = audio
+            
         return features, label, audio_file_path
 
 def get_data_loaders(annotations_file, root_dir, train_folds, val_folds, test_folds, batch_size=32, transform=None, mode="train"):

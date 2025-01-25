@@ -171,3 +171,5 @@ results/*
 *.pth
 
 *.gz
+
+src/saved_spectrograms/*

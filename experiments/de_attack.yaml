@@ -11,14 +11,11 @@ model_path: '/home/ilias/projects/adversarial_thesis/src/models/baseline_cnn.pth
 # model_path: '/home/ilias/projects/adversarial_thesis/src/models/AudioCLIP-finetuned-MLP-0.87.pth'
 # pretrained_audioclip: '/home/ilias/projects/adversarial_thesis/src/assets/AudioCLIP-pretrained.pt'
 
-# PSO attack parameters
+# DEA attack parameters
+d_max: 0.2
 max_iter : 20  
-swarm_size : 10  
+pop_size : 10  
 epsilon : 0.3
-c1 : 1.7
-c2 : 0.3
-w_max : 0.9
-w_min : 0.1
-l2_weight: 0.6
-save_sample: 10 # Number of pairs (original-advarsarial) to save 
-save_folder: "/home/ilias/projects/adversarial_thesis/data/exp_snr_35"
+lambda_reg: 0.6
+save_sample: 0 # Number of pairs (original-advarsarial) to save 
+save_folder: "/home/ilias/projects/adversarial_thesis/data"
