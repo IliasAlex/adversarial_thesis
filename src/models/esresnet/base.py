@@ -612,8 +612,32 @@ class _ESResNet(ResNetWithAttention):
             x.shape[0], -1, self.conv1.in_channels, *pow_spec_split_ch.shape[-2:]
         )
         x_db = torch.log10(pow_spec_split_ch).mul(10.0)
-
+        
         return x_db
+
+    def get_spectogram(self, x: torch.Tensor):
+        x = super(_ESResNet, self)._forward_pre_processing(x)
+        x = scale(x, -32768.0, 32767, -1.0, 1.0)
+
+        spec = self.spectrogram(x)
+        
+        return spec, x
+    
+    def _forward_pre_processing2(self, spec, x: torch.Tensor) -> torch.Tensor:
+        spec_split_ch = self.split_spectrogram(spec, x.shape[0])
+        pow_spec_split_ch = self.spectrogram_to_power(spec_split_ch)
+        pow_spec_split_ch = torch.where(
+            cast(torch.Tensor, pow_spec_split_ch > 0.0),
+            pow_spec_split_ch,
+            torch.full_like(pow_spec_split_ch, self.log10_eps)
+        )
+        pow_spec_split_ch = pow_spec_split_ch.reshape(
+            x.shape[0], -1, self.conv1.in_channels, *pow_spec_split_ch.shape[-2:]
+        )
+        x_db = torch.log10(pow_spec_split_ch).mul(10.0)
+        
+        return x_db    
+        
 
     def _forward_features(self, x_db: torch.Tensor) -> List[torch.Tensor]:
         outputs = list()

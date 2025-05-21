@@ -2,69 +2,152 @@ import os
 import torch
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from models.models import Autoencoder, UNet
+from models.models import Autoencoder, UNet, Autoencoder_AudioCLIP, AudioCLIP, Autoencoder_AudioCLIP_default
 from datasets.datasets import get_data_loaders
 
-def save_spectrogram(spectrogram, save_path):
+
+pretrained_audioclip = '/home/ilias/projects/adversarial_thesis/src/assets/AudioCLIP-pretrained.pt'
+audioclip = AudioCLIP(pretrained=pretrained_audioclip, multilabel=False)
+audioclip.to('cuda')
+
+
+def plot_spectrogram(spec: torch.Tensor, spectrogram_path):
+    """
+    Plot a spectrogram from a given spectrogram tensor.
+
+    Args:
+        spec (torch.Tensor): Spectrogram tensor of shape (batch, freq_bins, time_frames, 2)
+                             or (freq_bins, time_frames, 2). It contains real and imaginary parts.
+
+    Returns:
+        None
+    """
+    # Remove batch dimension if present
+    if spec.dim() == 4:
+        spec = spec.squeeze(0)  # Remove batch dimension
+
+    # Convert complex (real, imag) to magnitude
+    spec = torch.sqrt(spec[..., 0] ** 2 + spec[..., 1] ** 2)  # Compute magnitude
+
+    # Convert to decibel scale
+    spec = 20 * torch.log10(spec + 1e-6)  # Avoid log(0) by adding a small constant
+
+    # Convert to NumPy for plotting
+    spec_np = spec.detach().cpu().numpy()
+
+    # Plot the spectrogram
+    plt.figure(figsize=(10, 6))
+    plt.imshow(spec_np, aspect='auto', origin='lower', cmap='viridis')
+    plt.colorbar(label="Amplitude (dB)")
+    plt.xlabel("Time Frames")
+    plt.ylabel("Frequency Bins")
+    plt.title("Spectrogram")
+    plt.show()
+    plt.savefig(spectrogram_path)
+    plt.close()
+    
+def save_spectrogram(spectrogram, save_path, channel=0, batch_idx=0):
     """
     Save a spectrogram as an image.
 
     Args:
-        spectrogram (torch.Tensor): The spectrogram to save (2D array).
+        spectrogram (torch.Tensor): The spectrogram to save. Shape: [B, C, H, W] or [C, H, W] or [H, W].
         save_path (str): The file path to save the image.
+        channel (int): The channel index to visualize (if multi-channel spectrogram).
+        batch_idx (int): The batch index to visualize (if batched spectrogram).
     """
+    # Handle batched input [B, C, H, W]
+    if spectrogram.ndim == 4:
+        spectrogram = spectrogram[batch_idx, channel]
+    # Handle multi-channel input [C, H, W]
+    elif spectrogram.ndim == 3:
+        spectrogram = spectrogram[channel]
+    # Ensure the spectrogram is now 2D
+    if spectrogram.ndim != 2:
+        raise ValueError(f"Spectrogram must be 2D after indexing, but got shape {spectrogram.shape}")
+    
+    # Plot and save the spectrogram
     plt.figure(figsize=(10, 4))
     plt.imshow(spectrogram, aspect='auto', origin='lower', cmap='viridis')
-    plt.colorbar()
+    plt.colorbar(label='Amplitude (dB)')
     plt.tight_layout()
     plt.savefig(save_path)
     plt.close()
 
-def save_original_and_reconstructed(model, test_loader, output_dir, device):
+def save_reconstructed_spectrograms(model, audioclip, test_loader, output_dir, device):
     """
-    Perform inference with the trained autoencoder and save original and reconstructed spectrograms.
-
-    Args:
-        config (dict): Configuration dictionary.
-        model (torch.nn.Module): Trained autoencoder.
-        test_loader (torch.utils.data.DataLoader): Test data loader.
-        output_dir (str): Directory to save the spectrograms.
-        device (torch.device): Device to run inference on.
+    Save original waveforms, processed spectrograms, and reconstructed spectrograms for visualization.
     """
-    model.eval()
-    os.makedirs(output_dir, exist_ok=True)
+    model.eval()  # Set model to evaluation mode
 
     with torch.no_grad():
-        for i, (spectrograms, _, _) in enumerate(tqdm(test_loader, desc="Saving spectrograms")):
-            if spectrograms.dim() == 3:  # Ensure `unsqueeze(1)` is only applied if there is no channel dimension
-                spectrograms = spectrograms.unsqueeze(1)
+        for i, (waveforms, _, _) in enumerate(tqdm(test_loader, desc="Saving spectrograms")):
+            if waveforms.dim() == 3:  # Ensure correct shape
+                waveforms = waveforms.unsqueeze(1)  # Add channel dim if missing
 
-            spectrograms = spectrograms.to(device)
+            waveforms = waveforms.to(device)
 
-            # Reconstruct the spectrograms
-            reconstructed = model(spectrograms)
+            # **Convert Waveforms to Spectrograms (Log10 dB scale)**
+            x = audioclip.audio._forward_pre_processing(waveforms)
+            processed_spectrograms = 2 * (x - x.min()) / (x.max() - x.min() + 1e-6) - 1            # **Reconstruct Spectrograms**
+            reconstructed_spectrograms = model(processed_spectrograms)
 
-            for j in range(spectrograms.size(0)):
-                original = spectrograms[j].squeeze(0).cpu().numpy()  # Remove batch and channel dimensions
-                reconstructed_spectrogram = reconstructed[j].squeeze(0).cpu().numpy()
+            for j in range(waveforms.size(0)):  # Iterate over batch
+                sample_idx = i * test_loader.batch_size + j
 
-                # Define save paths
-                original_save_path = os.path.join(output_dir, f"original_{i * test_loader.batch_size + j}.png")
-                reconstructed_save_path = os.path.join(output_dir, f"reconstructed_{i * test_loader.batch_size + j}.png")
+                # **Extract Individual Components**
+                original_waveform = waveforms[j].squeeze().cpu().numpy()
+                processed_spectrogram = processed_spectrograms[j].squeeze().cpu().numpy()
+                reconstructed_spectrogram = reconstructed_spectrograms[j].squeeze().cpu().numpy()
 
-                # Save original and reconstructed spectrograms
-                save_spectrogram(original, original_save_path)
-                save_spectrogram(reconstructed_spectrogram, reconstructed_save_path)
+                # **Define save paths**
+                original_waveform_path = os.path.join(output_dir, f"original_waveform_{sample_idx}.png")
+                processed_spectrogram_path = os.path.join(output_dir, f"processed_spectrogram_{sample_idx}.png")
+                reconstructed_spectrogram_path = os.path.join(output_dir, f"reconstructed_spectrogram_{sample_idx}.png")
 
+                # **Plot and Save the Original Waveform**
+                plt.figure(figsize=(10, 4))
+                plt.plot(original_waveform, color='b', alpha=0.7)
+                plt.title(f"Original Waveform {sample_idx}")
+                plt.xlabel("Time (samples)")
+                plt.ylabel("Amplitude")
+                plt.grid()
+                plt.savefig(original_waveform_path)
+                plt.close()
 
+                #**Plot and Save the Processed Spectrogram**
+                plt.figure(figsize=(10, 4))
+                plt.imshow(processed_spectrogram.mean(axis=0), aspect='auto', origin='lower', cmap='inferno')
+                plt.title(f"Processed Spectrogram {sample_idx}")
+                plt.xlabel("Time")
+                plt.ylabel("Frequency")
+                plt.colorbar(label="Power (dB)")
+                plt.savefig(processed_spectrogram_path)
+                plt.close()
+
+                #**Plot and Save the Reconstructed Spectrogram**
+                plt.figure(figsize=(10, 4))
+                plt.imshow(reconstructed_spectrogram.mean(axis=0), aspect='auto', origin='lower', cmap='inferno')
+                plt.title(f"Reconstructed Spectrogram {sample_idx}")
+                plt.xlabel("Time")
+                plt.ylabel("Frequency")
+                plt.colorbar(label="Power (dB)")
+                plt.savefig(reconstructed_spectrogram_path)
+                plt.close()
+
+                # **Print Debugging Info**
+                print(f"[Sample {sample_idx}]")
+                print(f"  - Waveform Min: {original_waveform.min()}, Max: {original_waveform.max()}")
+                print(f"  - Processed Spectrogram Min: {processed_spectrogram.min()}, Max: {processed_spectrogram.max()}")
+                print(f"  - Reconstructed Spectrogram Min: {reconstructed_spectrogram.min()}, Max: {reconstructed_spectrogram.max()}")
 # Configuration
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 output_dir = "saved_spectrograms"
 train_loader, val_loader, test_loader = get_data_loaders(
-    "/data/urbansound8k/UrbanSound8K.csv", "/data/urbansound8k", [1,2,3,4,5,6,7], [8], [9], batch_size=32, mode='train'
+    "/data/urbansound8k/UrbanSound8K.csv", "/data/urbansound8k", [1,2,3,4,5,6,7], [8], [9], batch_size=32, mode='AudioCLIP'
 )
 
 # Load the trained model
-model = UNet().to(device)
-model.load_state_dict(torch.load("models/best_autoencoder_model.pth"))
-save_original_and_reconstructed(model, test_loader, output_dir, device)
+model = Autoencoder_AudioCLIP_default().to(device)
+model.load_state_dict(torch.load("models/best_audioclipautoencoder_model_default.pth"))
+save_reconstructed_spectrograms(model, audioclip,test_loader, output_dir, device)

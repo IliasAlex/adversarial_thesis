@@ -3,22 +3,27 @@ import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 
-def train(model, train_loader, val_loader, criterion, optimizer, num_epochs, device):
+def train(model, train_loader, val_loader, criterion, optimizer, num_epochs, device, patience=20):
     model.to(device)
     
+    best_val_acc = 0.0
+    best_model_wts = None
+    best_val_loss = float('inf')  # Track the lowest validation loss
+    epochs_no_improve = 0  # Counter for early stopping
+
     for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
         correct = 0
         total = 0
         
-        for data, labels in tqdm(train_loader, desc=f"Training Epoch {epoch + 1}/{num_epochs}"):
+        for data, labels, _ in tqdm(train_loader, desc=f"Training Epoch {epoch + 1}/{num_epochs}"):
             if data.dim() == 3:  # Ensure `unsqueeze(1)` is only applied if there is no channel dimension
                 data = data.unsqueeze(1)
 
             # Move data and labels to the device (GPU/CPU)
             data, labels = data.to(device), labels.to(device)
-            
+
             # Forward pass
             outputs = model(data)
             loss = criterion(outputs, labels)
@@ -43,8 +48,26 @@ def train(model, train_loader, val_loader, criterion, optimizer, num_epochs, dev
         # Validation phase
         val_loss, val_acc = evaluate(model, val_loader, criterion, device)
         print(f"Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_acc:.4f}")
+        
+        # Check if validation loss improved
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_val_acc = val_acc
+            best_model_wts = model.state_dict()  # Save best model
+            epochs_no_improve = 0  # Reset early stopping counter
+        else:
+            epochs_no_improve += 1
+        
+        # Early stopping condition
+        if epochs_no_improve >= patience:
+            print(f"Early stopping triggered after {epoch + 1} epochs.")
+            break  # Stop training
+    
+    # Load the best model weights
+    model.load_state_dict(best_model_wts)
     
     print("Training completed.")
+    print(f"Best Validation Accuracy: {best_val_acc:.4f}, Best Validation Loss: {best_val_loss:.4f}")
     return model
 
 def evaluate(model, data_loader, criterion, device):
@@ -54,9 +77,9 @@ def evaluate(model, data_loader, criterion, device):
     total = 0
     
     with torch.no_grad():
-        for data, labels in tqdm(data_loader, desc="Evaluating"):
+        for data, labels, _ in tqdm(data_loader, desc="Evaluating"):
             data, labels = data.to(device), labels.to(device)
-            
+
             # Forward pass
             if data.dim() == 3:  # Ensure `unsqueeze(1)` is only applied if there is no channel dimension
                 data = data.unsqueeze(1)  

@@ -1,3 +1,3 @@
-Fold 1 Test MSE: 0.8777
+Fold 1 Test MSE: 69.2064
 
-Average Test MSE: 0.8777
+Average Test MSE: 69.2064

@@ -6,10 +6,21 @@ batch_size: 32
 
 model_name: Baseline
 model_path: '/home/ilias/projects/adversarial_thesis/src/models/baseline_cnn.pth'
+#model_path: '/home/ilias/projects/adversarial_thesis/src/models/baseline_cnn_ESC50.pth'
+
+# model_name: BaselineAvgPooling
+# #model_path: '/home/ilias/projects/adversarial_thesis/src/models/baseline_cnn2.pth'
+# model_path: '/home/ilias/projects/adversarial_thesis/src/models/baseline_cnn_avg_ESC50.pth'
 
 # model_name: AudioCLIP
-# model_path: '/home/ilias/projects/adversarial_thesis/src/models/AudioCLIP-finetuned-MLP-0.87.pth'
+# #model_path: '/home/ilias/projects/AudioCLIP/AudioCLIP-ESC-50_80.pth'
+# #model_path: '/home/ilias/projects/AudioCLIP/best_model_znormalization_min_max11.pth'
+# model_path: '/home/ilias/projects/AudioCLIP/best_model_attention.pth'
 # pretrained_audioclip: '/home/ilias/projects/adversarial_thesis/src/assets/AudioCLIP-pretrained.pt'
+
+# model_name: Passt
+# model_path: '/home/ilias/projects/AudioCLIP/Passt-ESC50-normalized.pth'
+# #model_path: '/home/ilias/projects/AudioCLIP/Passt-Urban-normalized.pth'
 
 # PSO attack parameters
 max_iter : 20  
@@ -20,5 +31,6 @@ c2 : 0.3
 w_max : 0.9
 w_min : 0.1
 l2_weight: 0.6
-save_sample: 10 # Number of pairs (original-advarsarial) to save 
-save_folder: "/home/ilias/projects/adversarial_thesis/data/exp_snr_35"
+target_snr: [15]
+save_sample: 200 # Number of pairs (original-advarsarial) to save 
+save_folder: "/home/ilias/projects/adversarial_thesis/data/detection_15"
