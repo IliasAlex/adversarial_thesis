@@ -1,0 +1,10 @@
+detection_folder: '/home/ilias/projects/adversarial_thesis/data/detection_20'
+manualSeed: 3
+
+model_name: Baseline
+model_path: '/home/ilias/projects/adversarial_thesis/src/models/baseline_cnn.pth'
+
+# model_name: BaselineAvgPooling
+# model_path: '/home/ilias/projects/adversarial_thesis/src/models/baseline_cnn2.pth'
+
+

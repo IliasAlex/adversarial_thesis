@@ -7,3 +7,12 @@ manualSeed: 3
 batch_size: 32
 num_epochs: 100
 learning_rate: 0.001
+
+# model_name: 'Baseline' 
+# model_path: '/home/ilias/projects/adversarial_thesis/src/models/baseline_cnn.pth'
+
+# model_name: 'AudioCLIP'
+# model_path: '/home/ilias/projects/adversarial_thesis/src/models/AudioCLIP-finetuned-MLP-0.87.pth'
+# pretrained_audioclip: '/home/ilias/projects/adversarial_thesis/src/assets/AudioCLIP-pretrained.pt'
+
+# model_name: 'Passt'
