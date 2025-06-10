@@ -1,5 +1,5 @@
 # Adversarial attacks and robustness in deep neural networks for sound event detection
-Master's Thesis on Artificial Intelligence by Ilias Alexandropoulos,
+Master's Thesis on Artificial Intelligence by Ilias Alexandropoulos
 
 Thesis Supervisor: Theodoros Giannakopoulos
 
